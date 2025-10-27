@@ -1,14 +1,14 @@
 <?php
 /**
- * Plugin Name:       Auto Google Thumbnail
- * Plugin URI:        https://albertomurillo.pro/auto-google-thumbnail
+ * Plugin Name:       Auto Thumbnail for WordPress
+ * Plugin URI:        https://github.com/amurillogarrido/auto-thumbnail-for-wordpress
  * Description:       Establece automáticamente una imagen destacada desde Google Imágenes basándose en el título de la entrada.
  * Version:           1.0.1
  * Author:            Alberto Murillo
  * Author URI:        https://albertomurillo.pro/
  * License:           GPL-2.0+
  * License URI:       http://www.gnu.org/licenses/gpl-2.0.txt
- * Text Domain:       auto-google-thumbnail
+ * Text Domain:       auto-thumbnail-for-wordpress
  */
 
 if ( ! defined( 'WPINC' ) ) {
@@ -18,9 +18,6 @@ if ( ! defined( 'WPINC' ) ) {
 require_once plugin_dir_path( __FILE__ ) . 'admin-settings.php';
 require_once plugin_dir_path( __FILE__ ) . 'bulk-generate.php';
 
-/**
- * Añade tipos MIME adicionales para permitir más extensiones de imagen.
- */
 add_filter( 'upload_mimes', function( $mimes ) {
     $mimes['bmp']  = 'image/bmp';
     $mimes['webp'] = 'image/webp';
@@ -36,10 +33,6 @@ class Auto_Google_Thumbnail {
         add_filter( 'http_request_args', array( $this, 'filter_request_args' ), 10, 2 );
     }
 
-    /**
-     * Filtro para desactivar sslverify únicamente en peticiones a Google Imágenes
-     * o descargas directas de imágenes específicas.
-     */
     public function filter_request_args( $args, $url ) {
         $extensiones_imagen = array( 'jpg', 'jpeg', 'png', 'gif', 'webp', 'ico', 'bmp', 'svg' );
         $path = parse_url( $url, PHP_URL_PATH );
@@ -77,16 +70,11 @@ class Auto_Google_Thumbnail {
         update_option( 'agt_activity_log', $log );
     }
 
-    /**
-     * Hook en 'save_post'. Lanza la generación automática de la imagen destacada.
-     */
    public function on_save_post( $post_id, $post ) {
-    // Evita revisiones y autoguardados
     if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
         return;
     }
 
-    // Salir si NO es 'post'
     if ( get_post_type( $post_id ) !== 'post' ) {
         return;
     }
@@ -94,9 +82,6 @@ class Auto_Google_Thumbnail {
     $this->set_featured_image_from_google( $post_id );
 }
 
-    /**
-     * Manejador AJAX para generar la miniatura de un post específico.
-     */
     public function handle_ajax_generation() {
         check_ajax_referer( 'agt_bulk_nonce', 'nonce' );
         if ( ! current_user_can( 'manage_options' ) ) {
@@ -125,7 +110,6 @@ class Auto_Google_Thumbnail {
      * @return bool True si se asignó con éxito, false en caso contrario.
      */
     public function set_featured_image_from_google( $post_id ) {
-        // 1. COMPROBACIONES INICIALES
         if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
             return false;
         }
@@ -170,7 +154,6 @@ class Auto_Google_Thumbnail {
             return false;
         }
 
-        // Añadimos filetype al término si está configurado
         $filetype_filter = $options['agt_filetype'];
         if ( 'all' !== $filetype_filter ) {
             $search_term .= ' filetype:' . $filetype_filter;
@@ -181,7 +164,6 @@ class Auto_Google_Thumbnail {
             $search_term
         ) );
 
-        // Construcción de parámetros tbs
         $tbs_parts = array();
         if ( ! empty( $options['agt_rights'] ) ) {
             $tbs_parts[] = 'sur:' . $options['agt_rights'];
@@ -196,7 +178,6 @@ class Auto_Google_Thumbnail {
             $tbs_parts[] = 'itp:' . $options['agt_type'];
         }
 
-        // 2. CONSTRUCCIÓN DE LA URL DE BÚSQUEDA
         $query_args = array(
             'q'   => $search_term,
             'tbm' => 'isch',
@@ -212,7 +193,6 @@ class Auto_Google_Thumbnail {
             $search_url
         ) );
 
-        // 3. PETICIÓN Y SCRAPING
         $args = array(
             'user-agent' => 'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.96',
             'sslverify'  => false,
@@ -245,7 +225,6 @@ class Auto_Google_Thumbnail {
             count( $candidates )
         ) );
 
-        // Filtrar por extensión si corresponde
         if ( 'all' !== $filetype_filter ) {
             $filtered = array();
             foreach ( $candidates as $url ) {
@@ -266,11 +245,9 @@ class Auto_Google_Thumbnail {
             }
         }
 
-        // Seleccionar orden de candidatos: primera o aleatoria
         if ( 'random' === $options['agt_selection'] && count( $candidates ) > 1 ) {
             $random_key = array_rand( $candidates );
             $ordered = array( $candidates[ $random_key ] );
-            // El resto en orden original, por si el primero falla
             foreach ( $candidates as $i => $u ) {
                 if ( $i !== $random_key ) {
                     $ordered[] = $u;
@@ -280,7 +257,6 @@ class Auto_Google_Thumbnail {
             $ordered = $candidates;
         }
 
-        // 4. DESCARGA Y ASIGNACIÓN ITERATIVA
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
@@ -288,7 +264,6 @@ class Auto_Google_Thumbnail {
         foreach ( $ordered as $url ) {
             $url = trim( $url );
 
-            // 4.1 Si es un URL de Next.js (_next/image?url=...), extraer URL real
             if ( preg_match( '/_next\/image\?url=([^&]+)/', $url, $m ) ) {
                 $decoded_url = urldecode( $m[1] );
                 if ( filter_var( $decoded_url, FILTER_VALIDATE_URL ) ) {
@@ -300,7 +275,6 @@ class Auto_Google_Thumbnail {
                 }
             }
 
-            // 4.2 Descartar dominios que requieran autenticación (ej. lookaside.fbsbx.com)
             if ( strpos( $url, 'lookaside.fbsbx.com' ) !== false ) {
                 $this->log_message( sprintf(
                     __( 'Descartada URL de Facebook: %s', 'auto-google-thumbnail' ),
@@ -309,7 +283,6 @@ class Auto_Google_Thumbnail {
                 continue;
             }
 
-            // 4.3 HEAD para comprobar estado y Content-Type
             $head = wp_remote_head( $url, $args );
             if ( is_wp_error( $head ) ) {
                 $this->log_message( sprintf(
@@ -339,7 +312,6 @@ class Auto_Google_Thumbnail {
                 continue;
             }
 
-            // 4.4 Descarga a archivo temporal y forzar extensión si hace falta
             $tmp_file = download_url( $url );
             if ( is_wp_error( $tmp_file ) ) {
                 $this->log_message( sprintf(
@@ -350,11 +322,9 @@ class Auto_Google_Thumbnail {
                 continue;
             }
 
-            // Determinar extensión a partir de Content-Type o URL
             $path     = parse_url( $url, PHP_URL_PATH );
             $ext      = strtolower( pathinfo( $path, PATHINFO_EXTENSION ) );
             if ( ! in_array( $ext, array( 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp' ), true ) ) {
-                // Si no es una extensión reconocida, asignar según content-type
                 if ( strpos( $content_type, 'jpeg' ) !== false ) {
                     $ext = 'jpg';
                 } elseif ( strpos( $content_type, 'png' ) !== false ) {
@@ -384,7 +354,6 @@ class Auto_Google_Thumbnail {
                 continue;
             }
 
-            // 4.5 Asignar como destacado y actualizar ALT
             set_post_thumbnail( $post_id, $attach_id );
             update_post_meta( $attach_id, '_wp_attachment_image_alt', $search_term );
 
@@ -396,7 +365,6 @@ class Auto_Google_Thumbnail {
             return true;
         }
 
-        // Si llegamos aquí, ninguna URL funcionó
         $this->log_message( __( 'Ninguna URL candidata pudo descargarse correctamente.', 'auto-google-thumbnail' ), 'ERROR' );
         return false;
     }

@@ -1,7 +1,4 @@
 <?php
-/**
- * La clase que maneja la página de configuración y el menú del plugin.
- */
 if ( ! defined( 'WPINC' ) ) die;
 
 class AGT_Admin_Pages {
@@ -12,31 +9,25 @@ class AGT_Admin_Pages {
         add_action( 'admin_post_agt_clear_log', array( $this, 'clear_log_action' ) );
     }
 
-    /**
-     * Crea el menú principal y los submenús
-     */
     public function add_admin_menu() {
-        // Menú Principal
         add_menu_page(
-            'Auto Google Thumbnail',    // Título de la página
-            'Auto Thumbnail',           // Título del menú
-            'manage_options',           // Capacidad
-            'auto-google-thumbnail',    // Slug del menú principal
-            array($this, 'render_settings_page'), // Función que renderiza la página por defecto (ajustes)
-            'dashicons-format-image'    // Icono
+            'Auto Google Thumbnail',   
+            'Auto Thumbnail',          
+            'manage_options',          
+            'auto-google-thumbnail',   
+            array($this, 'render_settings_page'),
+            'dashicons-format-image'  
         );
 
-        // Submenú de Ajustes (re-apunta a la página principal)
         add_submenu_page(
             'auto-google-thumbnail',
             'Ajustes',
             'Ajustes',
             'manage_options',
-            'auto-google-thumbnail', // Mismo slug que el padre para que sea el principal
+            'auto-google-thumbnail', 
             array($this, 'render_settings_page')
         );
 
-        // Submenú para el Registro de Actividad
         add_submenu_page(
             'auto-google-thumbnail',
             'Registro de Actividad',
@@ -47,9 +38,6 @@ class AGT_Admin_Pages {
         );
     }
 
-    /**
-     * Renderiza la página de Ajustes
-     */
     public function render_settings_page() {
         ?>
         <div class="wrap">
@@ -65,9 +53,6 @@ class AGT_Admin_Pages {
         <?php
     }
 
-    /**
-     * Renderiza la página de Registro de Actividad
-     */
     public function render_log_page() {
         $log = get_option('agt_activity_log', []);
         ?>
@@ -98,7 +83,7 @@ class AGT_Admin_Pages {
                                 <td><?php echo esc_html($entry['date']); ?></td>
                                 <td>
                                     <?php
-                                    $color = '#2271b1'; // Default blue
+                                    $color = '#2271b1';
                                     if ($entry['type'] === 'SUCCESS') $color = '#00a32a';
                                     if ($entry['type'] === 'ERROR') $color = '#d63638';
                                     ?>
@@ -114,9 +99,6 @@ class AGT_Admin_Pages {
         <?php
     }
 
-    /**
-     * Acción para limpiar el log
-     */
     public function clear_log_action() {
         if ( isset($_POST['_wpnonce']) && wp_verify_nonce($_POST['_wpnonce'], 'agt_clear_log_nonce') && current_user_can('manage_options') ) {
             delete_option('agt_activity_log');
@@ -125,9 +107,6 @@ class AGT_Admin_Pages {
         exit;
     }
 
-    /**
-     * Registra todos los ajustes, secciones y campos del formulario
-     */
     public function register_settings() {
         register_setting( 'agt_settings_group', 'agt_settings' );
 

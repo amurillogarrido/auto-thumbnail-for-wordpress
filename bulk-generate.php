@@ -1,33 +1,23 @@
 <?php
-/**
- * Añade la página de administración para la generación en lote.
- */
 if ( ! defined( 'WPINC' ) ) die;
 
 class AGT_Bulk_Generate_Page {
 
     public function __construct() {
-        // Enganchamos la creación de la página al menú de administración.
         add_action('admin_menu', array($this, 'add_admin_page'));
     }
 
-    /**
-     * Añade la página como un submenú de nuestro menú principal.
-     */
     public function add_admin_page() {
         add_submenu_page(
-            'auto-google-thumbnail',      // Slug de la página padre (nuestro menú principal)
-            'Generación en Lote',         // Título de la página
-            'Generación en Lote',         // Título del menú
-            'manage_options',             // Capacidad requerida para verla
-            'agt-bulk-generate',          // Slug de esta página
-            array($this, 'render_page')   // Función que "dibuja" la página
+            'auto-google-thumbnail',     
+            'Generación en Lote',         
+            'Generación en Lote',         
+            'manage_options',           
+            'agt-bulk-generate',        
+            array($this, 'render_page')   
         );
     }
 
-    /**
-     * Dibuja el contenido HTML y JavaScript de la página.
-     */
     public function render_page() {
         ?>
         <div class="wrap">
@@ -58,15 +48,14 @@ class AGT_Bulk_Generate_Page {
                 </thead>
                 <tbody id="bulk-list">
                     <?php
-                    // Preparamos la consulta para obtener los posts sin imagen destacada
                     $args = array(
                         'post_type'      => 'post',
                         'post_status'    => 'publish',
-                        'posts_per_page' => -1, // -1 para obtener todos
+                        'posts_per_page' => -1, 
                         'meta_query'     => array(
                             array(
                                 'key'     => '_thumbnail_id',
-                                'compare' => 'NOT EXISTS' // La condición mágica: que no exista la meta key de la thumbnail.
+                                'compare' => 'NOT EXISTS' 
                             )
                         )
                     );
@@ -95,14 +84,12 @@ class AGT_Bulk_Generate_Page {
 
         <script type="text/javascript">
             jQuery(document).ready(function($) {
-                // Lógica para el botón de "Seleccionar Todos"
                 $('#select-all, #select-all-header').on('click', function(e) {
                     e.preventDefault();
                     var isChecked = $('#bulk-list input[type="checkbox"]:first').prop('checked');
                     $('#bulk-list input[type="checkbox"]').prop('checked', !isChecked);
                 });
 
-                // Lógica principal al pulsar el botón de "Iniciar Generación"
                 $('#start-bulk-generate').on('click', function() {
                     var postIds = $('input[name="post_ids[]"]:checked').map(function() {
                         return $(this).val();
@@ -113,7 +100,6 @@ class AGT_Bulk_Generate_Page {
                         return;
                     }
 
-                    // Bloqueamos los botones y mostramos el progreso
                     $(this).prop('disabled', true);
                     $('#select-all').prop('disabled', true);
                     $('#progress-container').show();
@@ -122,9 +108,7 @@ class AGT_Bulk_Generate_Page {
                     var totalPosts = postIds.length;
                     var processedCount = 0;
 
-                    // Función recursiva que procesa un post y luego se llama a sí misma para el siguiente
                     function processNext(index) {
-                        // Si ya hemos procesado todos, terminamos.
                         if (index >= totalPosts) {
                             $('#progress-log').prepend('<div><strong>¡Proceso completado!</strong></div>');
                             $('#start-bulk-generate').prop('disabled', false);
@@ -139,14 +123,13 @@ class AGT_Bulk_Generate_Page {
                         $status.html('<strong>Procesando...</strong>');
                         $('#progress-log').prepend('<div>ID ' + postId + ': Iniciando...</div>');
 
-                        // La llamada AJAX
                         $.ajax({
-                            url: ajaxurl, // URL ajax de WordPress (variable global)
+                            url: ajaxurl, 
                             type: 'POST',
                             data: {
-                                action: 'agt_generate_single', // La acción que definimos en el PHP principal
+                                action: 'agt_generate_single', 
                                 post_id: postId,
-                                nonce: '<?php echo wp_create_nonce("agt_bulk_nonce"); ?>' // Nonce de seguridad
+                                nonce: '<?php echo wp_create_nonce("agt_bulk_nonce"); ?>' 
                             },
                             success: function(response) {
                                 if (response.success) {
@@ -165,12 +148,11 @@ class AGT_Bulk_Generate_Page {
                                 processedCount++;
                                 var percent = (processedCount / totalPosts) * 100;
                                 $('#progress-bar-inner').css('width', percent + '%').text(Math.round(percent) + '%');
-                                processNext(index + 1); // ¡Llamada al siguiente!
+                                processNext(index + 1);
                             }
                         });
                     }
 
-                    // Empezamos con el primer artículo de la lista (índice 0)
                     processNext(0);
                 });
             });

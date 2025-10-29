@@ -3,7 +3,7 @@
  * Plugin Name:       Auto Thumbnail for WordPress
  * Plugin URI:        https://github.com/amurillogarrido/auto-thumbnail-for-wordpress
  * Description:       Establece automáticamente una imagen destacada desde Google Imágenes basándose en el título de la entrada.
- * Version:           1.0.1
+ * Version:           1.0.2 
  * Author:            Alberto Murillo
  * Author URI:        https://albertomurillo.pro/
  * License:           GPL-2.0+
@@ -70,17 +70,29 @@ class Auto_Google_Thumbnail {
         update_option( 'agt_activity_log', $log );
     }
 
+   /**
+    * Se ejecuta cuando se guarda un post. Decide si generar la imagen destacada.
+    *
+    * @param int     $post_id ID del post guardado.
+    * @param WP_Post $post    Objeto del post guardado.
+    */
    public function on_save_post( $post_id, $post ) {
-    if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
-        return;
+        // --- ¡NUEVA COMPROBACIÓN! ---
+        // Si no es una entrada ('post'), no hacemos nada.
+        if ( get_post_type( $post_id ) !== 'post' ) {
+            return; 
+        }
+        // --- FIN NUEVA COMPROBACIÓN ---
+
+        // Comprobaciones existentes (revisiones, auto-guardados)
+        if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
+            return;
+        }
+
+        // El resto de la lógica solo se ejecutará si es un 'post'
+        $this->set_featured_image_from_google( $post_id );
     }
 
-    if ( get_post_type( $post_id ) !== 'post' ) {
-        return;
-    }
-
-    $this->set_featured_image_from_google( $post_id );
-}
 
     public function handle_ajax_generation() {
         check_ajax_referer( 'agt_bulk_nonce', 'nonce' );
@@ -92,6 +104,14 @@ class Auto_Google_Thumbnail {
         if ( ! $post_id ) {
             wp_send_json_error( __( 'ID de post no válido.', 'auto-google-thumbnail' ) );
         }
+        
+        // --- ¡NUEVA COMPROBACIÓN AJAX! ---
+        // Asegurarnos de que el AJAX solo procese posts
+        if ( get_post_type( $post_id ) !== 'post' ) {
+             wp_send_json_error( __( 'Este ID no corresponde a una entrada.', 'auto-google-thumbnail' ) );
+        }
+        // --- FIN NUEVA COMPROBACIÓN AJAX ---
+
 
         $result = $this->set_featured_image_from_google( $post_id );
 
@@ -110,24 +130,42 @@ class Auto_Google_Thumbnail {
      * @return bool True si se asignó con éxito, false en caso contrario.
      */
     public function set_featured_image_from_google( $post_id ) {
+        // Comprobaciones iniciales (revisiones, autosaves)
         if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
             return false;
         }
+        
+        // --- ¡NUEVA COMPROBACIÓN (REDUNDANTE PERO SEGURA)! ---
+        // Volvemos a asegurar que solo procesamos 'post'
+        if ( get_post_type( $post_id ) !== 'post' ) {
+            $this->log_message( sprintf(
+                __( 'Proceso abortado: El ID %d no es una entrada (es %s).', 'auto-google-thumbnail' ),
+                $post_id,
+                get_post_type( $post_id )
+            ), 'INFO' );
+            return false;
+        }
+        // --- FIN NUEVA COMPROBACIÓN ---
 
         $post_status = get_post_status( $post_id );
         $allowed     = array( 'publish', 'future', 'private' );
         if ( ! in_array( $post_status, $allowed, true ) ) {
-            return false;
+             $this->log_message( sprintf(
+                __( 'Proceso abortado para Post ID: %d. Estado no permitido (%s).', 'auto-google-thumbnail' ),
+                $post_id,
+                $post_status
+            ), 'INFO' );
+            return false; // No procesar borradores, pendientes, etc.
         }
 
         $this->log_message( sprintf(
-            __( 'Iniciando proceso para Post ID: %d (Estado: %s).', 'auto-google-thumbnail' ),
+            __( 'Iniciando proceso para Entrada ID: %d (Estado: %s).', 'auto-google-thumbnail' ),
             $post_id,
             $post_status
         ) );
 
         if ( has_post_thumbnail( $post_id ) ) {
-            $this->log_message( __( 'Proceso abortado: El post ya tiene una imagen destacada.', 'auto-google-thumbnail' ), 'INFO' );
+            $this->log_message( __( 'Proceso abortado: La entrada ya tiene una imagen destacada.', 'auto-google-thumbnail' ), 'INFO' );
             return false;
         }
 
@@ -150,7 +188,7 @@ class Auto_Google_Thumbnail {
 
         $search_term = get_the_title( $post_id );
         if ( empty( $search_term ) ) {
-            $this->log_message( __( 'Proceso abortado: El post no tiene título.', 'auto-google-thumbnail' ), 'ERROR' );
+            $this->log_message( __( 'Proceso abortado: La entrada no tiene título.', 'auto-google-thumbnail' ), 'ERROR' );
             return false;
         }
 
@@ -358,7 +396,7 @@ class Auto_Google_Thumbnail {
             update_post_meta( $attach_id, '_wp_attachment_image_alt', $search_term );
 
             $this->log_message( sprintf(
-                __( '¡ÉXITO! Imagen generada y asignada al post (ID de adjunto: %d).', 'auto-google-thumbnail' ),
+                __( '¡ÉXITO! Imagen generada y asignada a la entrada (ID de adjunto: %d).', 'auto-google-thumbnail' ),
                 $attach_id
             ), 'SUCCESS' );
 

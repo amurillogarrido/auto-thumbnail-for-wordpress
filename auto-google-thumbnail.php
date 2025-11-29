@@ -3,7 +3,7 @@
  * Plugin Name:       Auto Thumbnail for WordPress
  * Plugin URI:        https://github.com/amurillogarrido/auto-thumbnail-for-wordpress
  * Description:       Establece automáticamente una imagen destacada desde Google Imágenes basándose en el título de la entrada.
- * Version:           1.0.2 
+ * Version:           1.0.3
  * Author:            Alberto Murillo
  * Author URI:        https://albertomurillo.pro/
  * License:           GPL-2.0+
@@ -77,19 +77,14 @@ class Auto_Google_Thumbnail {
     * @param WP_Post $post    Objeto del post guardado.
     */
    public function on_save_post( $post_id, $post ) {
-        // --- ¡NUEVA COMPROBACIÓN! ---
-        // Si no es una entrada ('post'), no hacemos nada.
         if ( get_post_type( $post_id ) !== 'post' ) {
             return; 
         }
-        // --- FIN NUEVA COMPROBACIÓN ---
 
-        // Comprobaciones existentes (revisiones, auto-guardados)
         if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
             return;
         }
 
-        // El resto de la lógica solo se ejecutará si es un 'post'
         $this->set_featured_image_from_google( $post_id );
     }
 
@@ -105,12 +100,9 @@ class Auto_Google_Thumbnail {
             wp_send_json_error( __( 'ID de post no válido.', 'auto-google-thumbnail' ) );
         }
         
-        // --- ¡NUEVA COMPROBACIÓN AJAX! ---
-        // Asegurarnos de que el AJAX solo procese posts
         if ( get_post_type( $post_id ) !== 'post' ) {
              wp_send_json_error( __( 'Este ID no corresponde a una entrada.', 'auto-google-thumbnail' ) );
         }
-        // --- FIN NUEVA COMPROBACIÓN AJAX ---
 
 
         $result = $this->set_featured_image_from_google( $post_id );
@@ -130,13 +122,10 @@ class Auto_Google_Thumbnail {
      * @return bool True si se asignó con éxito, false en caso contrario.
      */
     public function set_featured_image_from_google( $post_id ) {
-        // Comprobaciones iniciales (revisiones, autosaves)
         if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
             return false;
         }
         
-        // --- ¡NUEVA COMPROBACIÓN (REDUNDANTE PERO SEGURA)! ---
-        // Volvemos a asegurar que solo procesamos 'post'
         if ( get_post_type( $post_id ) !== 'post' ) {
             $this->log_message( sprintf(
                 __( 'Proceso abortado: El ID %d no es una entrada (es %s).', 'auto-google-thumbnail' ),
@@ -145,7 +134,6 @@ class Auto_Google_Thumbnail {
             ), 'INFO' );
             return false;
         }
-        // --- FIN NUEVA COMPROBACIÓN ---
 
         $post_status = get_post_status( $post_id );
         $allowed     = array( 'publish', 'future', 'private' );
@@ -155,7 +143,7 @@ class Auto_Google_Thumbnail {
                 $post_id,
                 $post_status
             ), 'INFO' );
-            return false; // No procesar borradores, pendientes, etc.
+            return false;
         }
 
         $this->log_message( sprintf(
@@ -171,6 +159,7 @@ class Auto_Google_Thumbnail {
 
         $defaults = array(
             'agt_enable'    => 0,
+            'agt_overlay'   => 0, // Default off
             'agt_filetype'  => 'all',
             'agt_rights'    => '',
             'agt_size'      => '',
@@ -360,6 +349,20 @@ class Auto_Google_Thumbnail {
                 continue;
             }
 
+            // --- INICIO NUEVO CÓDIGO: APLICAR TEXTO ---
+            // Verificamos si la opción está activa en los ajustes
+            // Se usa $search_term original (que es el título del post)
+            if ( ! empty( $options['agt_overlay'] ) ) {
+                $this->log_message( __('Aplicando capa de texto a la imagen...', 'auto-google-thumbnail'), 'INFO' );
+                // Pasamos get_the_title($post_id) directamente para evitar los filtros "filetype:..." añadidos a $search_term
+                $original_title = get_the_title( $post_id );
+                $overlay_success = $this->apply_text_overlay( $tmp_file, $original_title ); 
+                if ( ! $overlay_success ) {
+                    $this->log_message( __('No se pudo aplicar el texto, se usará la imagen original.', 'auto-google-thumbnail'), 'ERROR' );
+                }
+            }
+            // --- FIN NUEVO CÓDIGO ---
+
             $path     = parse_url( $url, PHP_URL_PATH );
             $ext      = strtolower( pathinfo( $path, PATHINFO_EXTENSION ) );
             if ( ! in_array( $ext, array( 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp' ), true ) ) {
@@ -405,6 +408,83 @@ class Auto_Google_Thumbnail {
 
         $this->log_message( __( 'Ninguna URL candidata pudo descargarse correctamente.', 'auto-google-thumbnail' ), 'ERROR' );
         return false;
+    }
+
+    /**
+     * Aplica una capa oscura y texto sobre la imagen temporal.
+     *
+     * @param string $image_path Ruta del archivo temporal.
+     * @param string $text Texto a escribir.
+     * @return bool True si tuvo éxito, false si falló.
+     */
+    private function apply_text_overlay( $image_path, $text ) {
+        $info = @getimagesize( $image_path );
+        if ( ! $info ) return false;
+
+        $width  = $info[0];
+        $height = $info[1];
+        $type   = $info[2];
+
+        // 1. Cargar la imagen según su tipo
+        $im = null;
+        switch ( $type ) {
+            case IMAGETYPE_JPEG: $im = @imagecreatefromjpeg( $image_path ); break;
+            case IMAGETYPE_PNG:  $im = @imagecreatefrompng( $image_path ); break;
+            case IMAGETYPE_GIF:  $im = @imagecreatefromgif( $image_path ); break;
+            case IMAGETYPE_WEBP: $im = @imagecreatefromwebp( $image_path ); break;
+        }
+
+        if ( ! $im ) return false;
+
+        // 2. Aplicar filtro oscuro (Capa negra al 40% de opacidad)
+        // Creamos una capa negra del tamaño de la imagen
+        $overlay = imagecreatetruecolor( $width, $height );
+        $black   = imagecolorallocate( $overlay, 0, 0, 0 );
+        imagefill( $overlay, 0, 0, $black );
+        
+        // Copiamos la capa negra sobre la imagen original con opacidad (40%)
+        // 40 en base 100. imagecopymerge usa 0-100.
+        imagecopymerge( $im, $overlay, 0, 0, 0, 0, $width, $height, 40 );
+        imagedestroy( $overlay );
+
+        // 3. Escribir el Texto
+        $text_color = imagecolorallocate( $im, 255, 255, 255 ); // Blanco
+        
+        // Usamos la fuente interna 5 (la más grande de las básicas)
+        $font = 5; 
+        $font_width  = imagefontwidth( $font );
+        $font_height = imagefontheight( $font );
+        
+        // Envolver texto para que quepa (Wordwrap básico)
+        // Calculamos cuántos caracteres caben por línea con un margen
+        $margin = 20;
+        $max_chars_line = floor( ( $width - ($margin * 2) ) / $font_width );
+        if ($max_chars_line < 5) $max_chars_line = 5; // Mínimo de seguridad
+
+        $wrapped_text = wordwrap( $text, $max_chars_line, "\n", true );
+        $lines = explode( "\n", $wrapped_text );
+
+        // Calcular altura total del bloque de texto para centrarlo verticalmente
+        $total_text_height = count($lines) * ($font_height + 10); // 10px de interlineado
+        $y = ( $height - $total_text_height ) / 2;
+
+        foreach ( $lines as $line ) {
+            $line_width = strlen( $line ) * $font_width;
+            $x = ( $width - $line_width ) / 2; // Centrado horizontal
+            imagestring( $im, $font, $x, $y, $line, $text_color );
+            $y += $font_height + 10; // Siguiente línea
+        }
+
+        // 4. Guardar la imagen modificada sobreescribiendo la temporal
+        switch ( $type ) {
+            case IMAGETYPE_JPEG: imagejpeg( $im, $image_path, 90 ); break;
+            case IMAGETYPE_PNG:  imagepng( $im, $image_path ); break;
+            case IMAGETYPE_GIF:  imagegif( $im, $image_path ); break;
+            case IMAGETYPE_WEBP: imagewebp( $im, $image_path, 90 ); break;
+        }
+
+        imagedestroy( $im );
+        return true;
     }
 }
 

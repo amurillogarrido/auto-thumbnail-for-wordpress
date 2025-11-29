@@ -112,6 +112,11 @@ class AGT_Admin_Pages {
 
         add_settings_section( 'agt_general_section', 'Ajustes Generales', null, 'auto-google-thumbnail-settings' );
         add_settings_field( 'agt_enable_field', 'Activar Plugin', array( $this, 'render_enable_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
+        
+        // --- NUEVO CAMPO: Overlay ---
+        add_settings_field( 'agt_overlay_field', 'Diseño de Portada', array( $this, 'render_overlay_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
+        // ----------------------------
+        
         add_settings_field( 'agt_selection_field', 'Selección de Imagen', array( $this, 'render_selection_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         add_settings_field( 'agt_language_field', 'Idioma de Búsqueda', array( $this, 'render_language_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         
@@ -129,6 +134,15 @@ class AGT_Admin_Pages {
         echo '<input type="checkbox" name="agt_settings[agt_enable]" value="1" ' . checked( 1, $checked, false ) . ' />';
         echo '<p class="description">Marcar para activar la generación automática.</p>';
     }
+
+    // --- NUEVA FUNCIÓN ---
+    public function render_overlay_field() {
+        $options = get_option('agt_settings');
+        $checked = $options['agt_overlay'] ?? 0;
+        echo '<input type="checkbox" name="agt_settings[agt_overlay]" value="1" ' . checked( 1, $checked, false ) . ' />';
+        echo '<p class="description">Si se marca, se oscurecerá la imagen y se escribirá el título de la entrada sobre ella.</p>';
+    }
+    // ---------------------
 
     public function render_selection_field() {
         $options = get_option('agt_settings');

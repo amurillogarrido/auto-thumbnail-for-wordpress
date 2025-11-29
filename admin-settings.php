@@ -128,7 +128,7 @@ class AGT_Admin_Pages {
         add_settings_field( 'agt_overlay_bg_color_field', 'Color de Fondo (Capa)', array( $this, 'render_overlay_bg_color_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
         add_settings_field( 'agt_overlay_opacity_field', 'Opacidad del Fondo (%)', array( $this, 'render_overlay_opacity_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
         add_settings_field( 'agt_overlay_text_color_field', 'Color del Texto', array( $this, 'render_overlay_text_color_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
-        add_settings_field( 'agt_overlay_font_family_field', 'Fuente (Google Fonts)', array( $this, 'render_overlay_font_family_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
+        add_settings_field( 'agt_overlay_font_family_field', 'Fuente (Carpeta /fonts/)', array( $this, 'render_overlay_font_family_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
         add_settings_field( 'agt_overlay_font_size_field', 'Tamaño de Fuente (Máx)', array( $this, 'render_overlay_font_size_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
     }
     
@@ -253,19 +253,19 @@ class AGT_Admin_Pages {
     public function render_overlay_font_family_field() {
         $options = get_option('agt_settings');
         $selected = $options['agt_overlay_font_family'] ?? 'Roboto';
+        
+        // Usamos claves simples para evitar errores de espacios en nombres de archivo
         $fonts = [ 
             'Roboto' => 'Roboto', 
-            'Open Sans' => 'Open Sans', 
-            'Lato' => 'Lato', 
-            'Oswald' => 'Oswald', 
-            'Montserrat' => 'Montserrat'
+            'Source' => 'Source', 
         ];
         echo '<select name="agt_settings[agt_overlay_font_family]">';
-        foreach ( $fonts as $label => $value ) {
+        foreach ( $fonts as $value => $label ) {
+            // Nota: Aquí he corregido el orden $value => $label para que coincida con el array
             echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
         }
         echo '</select>';
-        echo '<p class="description">La fuente se descargará automáticamente de Google Fonts al generar la imagen.</p>';
+        echo '<p class="description">IMPORTANTE: Debes subir el archivo .ttf (ej: <code>Roboto.ttf</code> o <code>Roboto-Bold.ttf</code>) a la carpeta <code>/fonts/</code> dentro del plugin.</p>';
     }
 
     public function render_overlay_font_size_field() {

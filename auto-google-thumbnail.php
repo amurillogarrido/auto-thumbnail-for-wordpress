@@ -3,7 +3,7 @@
  * Plugin Name:       Auto Thumbnail for WordPress
  * Plugin URI:        https://github.com/amurillogarrido/auto-thumbnail-for-wordpress
  * Description:       Establece automáticamente una imagen destacada desde Google Imágenes basándose en el título de la entrada.
- * Version:           1.0.8
+ * Version:           1.0.9
  * Author:            Alberto Murillo
  * Author URI:        https://albertomurillo.pro/
  * License:           GPL-2.0+
@@ -41,7 +41,7 @@ class Auto_Google_Thumbnail {
         $is_google_search   = strpos( $url, 'google.com/search?tbm=isch' ) !== false;
         $is_image_download  = in_array( $ext, $extensiones_imagen );
         
-        // Permitir descarga de fuentes de github/google fonts para el overlay sin verificar SSL
+        // Mantenemos esto por compatibilidad, aunque ya no descargamos fuentes externamente
         $is_font_download   = strpos( $url, 'github.com/google/fonts' ) !== false || strpos( $url, 'raw.githubusercontent.com' ) !== false;
 
         if ( $is_google_search || $is_image_download || $is_font_download ) {
@@ -234,8 +234,7 @@ class Auto_Google_Thumbnail {
             $search_url
         ) );
 
-        // --- VOLVEMOS AL USER AGENT ORIGINAL (NEXUS 5X) ---
-        // Este User-Agent fuerza la versión móvil antigua donde 'data-ou' existe.
+        // --- USER AGENT ---
         $args = array(
             'user-agent' => 'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.96',
             'sslverify'  => false,
@@ -428,7 +427,6 @@ class Auto_Google_Thumbnail {
         }
 
         // GD Alpha: 0 (opaco) a 127 (transparente). Convertimos input 0-100 a 0-127 invertido.
-        // Opacidad 100 (solido) -> Alpha 0. Opacidad 0 (transparente) -> Alpha 127.
         $alpha = (int) ( ( 100 - $opacity ) * 1.27 );
         
         $overlay_color = imagecolorallocatealpha( $im, $r, $g, $b, $alpha );
@@ -436,7 +434,10 @@ class Auto_Google_Thumbnail {
 
         // 2. Configurar Texto y Fuente
         $font_name = $options['agt_overlay_font_family'] ?? 'Roboto';
-        $font_file = $this->get_font_file( $font_name ); // Descarga o recupera ruta TTF
+        
+        // MODIFICADO: Busca la fuente localmente en la carpeta 'fonts'
+        $font_file = $this->get_font_file( $font_name ); 
+
         $font_size = intval( $options['agt_overlay_font_size'] ?? 40 );
         
         $text_hex = $options['agt_overlay_text_color'] ?? '#FFFFFF';
@@ -458,10 +459,10 @@ class Auto_Google_Thumbnail {
         $current_line = '';
         $max_width = $width * 0.8; // Margen 10% a cada lado
 
-        // Si la fuente no se pudo cargar, usar fuente del sistema (muy básica, sin TTF)
+        // Si la fuente no se pudo cargar, usar fuente del sistema
         if ( ! $font_file || ! file_exists( $font_file ) ) {
-            // Fallback básico sin centrado perfecto ni fuentes custom
-             imagestring($im, 5, 10, 10, "Error fuente", $text_color);
+            // Fallback básico - Esto es lo que salía en tu imagen, significa que no encontró la fuente.
+             imagestring($im, 5, 10, 10, "Error: Sube la fuente " . $font_name . ".ttf a /fonts/", $text_color);
         } else {
             foreach ( $words as $word ) {
                 $test_line = $current_line . ($current_line ? ' ' : '') . $word;
@@ -501,49 +502,29 @@ class Auto_Google_Thumbnail {
     }
 
     /**
-     * Descarga la fuente TTF si no existe localmente
+     * MODIFICADO: Busca la fuente localmente en la carpeta /fonts/ del plugin.
+     * No descarga nada. El usuario debe subir la fuente.
      */
     private function get_font_file( $font_name ) {
-        $upload_dir = wp_upload_dir();
-        $font_dir = $upload_dir['basedir'] . '/agt-fonts';
-        if ( ! file_exists( $font_dir ) ) wp_mkdir_p( $font_dir );
-
-        $filename = sanitize_file_name( $font_name ) . '-Bold.ttf';
-        $local_path = $font_dir . '/' . $filename;
-
-        // Si ya la tenemos, devolver ruta
-        if ( file_exists( $local_path ) ) return $local_path;
-
-        // Mapeo básico de URLs a raw github de Google Fonts (OFL)
-        // Usamos Bold para que se vea mejor en títulos
-        $base_url = 'https://github.com/google/fonts/raw/main/';
-        $map = [
-            'Roboto'      => 'apache/roboto/static/Roboto-Bold.ttf',
-            'Open Sans'   => 'apache/opensans/static/OpenSans-Bold.ttf',
-            'Lato'        => 'ofl/lato/Lato-Bold.ttf',
-            'Oswald'      => 'ofl/oswald/static/Oswald-Bold.ttf',
-            'Montserrat'  => 'ofl/montserrat/static/Montserrat-Bold.ttf'
+        // Carpeta 'fonts' dentro del plugin
+        $font_dir = plugin_dir_path( __FILE__ ) . 'fonts/';
+        
+        // Lista de posibles nombres de archivo que el usuario podría haber subido
+        // Probamos con y sin "-Bold", en minúsculas y tal cual viene del select.
+        $possible_names = [
+            $font_name . '-Bold.ttf',
+            $font_name . '.ttf',
+            strtolower($font_name) . '-bold.ttf',
+            strtolower($font_name) . '.ttf'
         ];
 
-        // Mapeo por defecto a Roboto si no encuentra la fuente
-        $repo_path = isset($map[$font_name]) ? $map[$font_name] : $map['Roboto'];
-        $url = $base_url . $repo_path;
-
-        // Descargar
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-        
-        // Usamos una función auxiliar para descargar sin verificar SSL estricto (ya filtrado en http_request_args)
-        $tmp = download_url( $url );
-        
-        if ( is_wp_error( $tmp ) ) {
-            $this->log_message( 'Error descargando fuente: ' . $tmp->get_error_message(), 'ERROR' );
-            return false;
+        foreach ($possible_names as $file) {
+            if ( file_exists( $font_dir . $file ) ) {
+                return $font_dir . $file;
+            }
         }
 
-        copy( $tmp, $local_path );
-        @unlink( $tmp );
-
-        return $local_path;
+        return false;
     }
 }
 

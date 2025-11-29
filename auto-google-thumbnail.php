@@ -3,7 +3,7 @@
  * Plugin Name:       Auto Thumbnail for WordPress
  * Plugin URI:        https://github.com/amurillogarrido/auto-thumbnail-for-wordpress
  * Description:       Establece automáticamente una imagen destacada desde Google Imágenes basándose en el título de la entrada.
- * Version:           1.0.6
+ * Version:           1.0.8
  * Author:            Alberto Murillo
  * Author URI:        https://albertomurillo.pro/
  * License:           GPL-2.0+
@@ -234,17 +234,10 @@ class Auto_Google_Thumbnail {
             $search_url
         ) );
 
-        // --- USER AGENTS ROTATIVOS ---
-        $user_agents = array(
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0'
-        );
-        $random_ua = $user_agents[ array_rand( $user_agents ) ];
-
+        // --- VOLVEMOS AL USER AGENT ORIGINAL (NEXUS 5X) ---
+        // Este User-Agent fuerza la versión móvil antigua donde 'data-ou' existe.
         $args = array(
-            'user-agent' => $random_ua,
+            'user-agent' => 'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.96',
             'sslverify'  => false,
             'timeout'    => 15,
         );

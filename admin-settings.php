@@ -7,25 +7,6 @@ class AGT_Admin_Pages {
         add_action( 'admin_menu', array( $this, 'add_admin_menu' ) );
         add_action( 'admin_init', array( $this, 'register_settings' ) );
         add_action( 'admin_post_agt_clear_log', array( $this, 'clear_log_action' ) );
-        // Enganchamos la carga de scripts para el selector de color
-        add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_admin_scripts' ) );
-    }
-
-    /**
-     * Carga los estilos y scripts necesarios (Color Picker de WP)
-     */
-    public function enqueue_admin_scripts( $hook_suffix ) {
-        // Solo cargar en las páginas de nuestro plugin
-        if ( strpos( $hook_suffix, 'auto-google-thumbnail' ) === false ) {
-            return;
-        }
-        
-        // Cargar librerías nativas de WordPress para el selector de color
-        wp_enqueue_style( 'wp-color-picker' );
-        wp_enqueue_script( 'agt-admin-script', false, array( 'wp-color-picker' ), false, true );
-        
-        // Script inline para inicializar el color picker
-        wp_add_inline_script( 'agt-admin-script', 'jQuery(document).ready(function($){ $(".agt-color-field").wpColorPicker(); });' );
     }
 
     public function add_admin_menu() {
@@ -77,7 +58,7 @@ class AGT_Admin_Pages {
         ?>
         <div class="wrap">
             <h1>Registro de Actividad</h1>
-            <p>Aquí puedes ver qué está haciendo el plugin internamente.</p>
+            <p>Aquí se muestran las últimas 100 acciones realizadas por el plugin. Es muy útil para depurar por qué una imagen no se ha generado.</p>
             
             <form action="admin-post.php" method="post" style="margin-bottom: 20px;">
                 <input type="hidden" name="action" value="agt_clear_log">
@@ -127,158 +108,172 @@ class AGT_Admin_Pages {
     }
 
     public function register_settings() {
-        // Registramos el grupo de opciones con una función de sanitización
-        register_setting( 'agt_settings_group', 'agt_settings', array( $this, 'sanitize_settings' ) );
+        register_setting( 'agt_settings_group', 'agt_settings' );
 
-        // --- SECCIÓN 1: GENERAL ---
         add_settings_section( 'agt_general_section', 'Ajustes Generales', null, 'auto-google-thumbnail-settings' );
         add_settings_field( 'agt_enable_field', 'Activar Plugin', array( $this, 'render_enable_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
+        add_settings_field( 'agt_selection_field', 'Selección de Imagen', array( $this, 'render_selection_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
+        add_settings_field( 'agt_language_field', 'Idioma de Búsqueda', array( $this, 'render_language_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         
-        // --- SECCIÓN 2: DISEÑO DE PORTADA (NUEVO) ---
-        add_settings_section( 'agt_design_section', 'Diseño de Portada Automática', array($this, 'design_section_info'), 'auto-google-thumbnail-settings' );
-        add_settings_field( 'agt_overlay_enable_field', 'Activar Portada', array( $this, 'render_overlay_enable_field' ), 'auto-google-thumbnail-settings', 'agt_design_section' );
-        add_settings_field( 'agt_font_family_field', 'Tipografía (Google Fonts)', array( $this, 'render_font_family_field' ), 'auto-google-thumbnail-settings', 'agt_design_section' );
-        add_settings_field( 'agt_font_size_field', 'Tamaño del Texto (px)', array( $this, 'render_font_size_field' ), 'auto-google-thumbnail-settings', 'agt_design_section' );
-        add_settings_field( 'agt_font_color_field', 'Color del Texto', array( $this, 'render_font_color_field' ), 'auto-google-thumbnail-settings', 'agt_design_section' );
-        add_settings_field( 'agt_overlay_opacity_field', 'Opacidad del Fondo Oscuro', array( $this, 'render_overlay_opacity_field' ), 'auto-google-thumbnail-settings', 'agt_design_section' );
-
-        // --- SECCIÓN 3: FILTROS DE BÚSQUEDA ---
-        add_settings_section( 'agt_filter_section', 'Filtros de Búsqueda en Google', null, 'auto-google-thumbnail-settings' );
-        add_settings_field( 'agt_selection_field', 'Selección de Imagen', array( $this, 'render_selection_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
-        add_settings_field( 'agt_language_field', 'Idioma de Búsqueda', array( $this, 'render_language_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
+        add_settings_section( 'agt_filter_section', 'Filtros de Búsqueda', null, 'auto-google-thumbnail-settings' );
         add_settings_field( 'agt_rights_field', 'Derechos de Uso', array( $this, 'render_rights_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
-        add_settings_field( 'agt_filetype_field', 'Tipo de Archivo', array( $this, 'render_filetype_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
+        add_settings_field( 'agt_filetype_field', 'Tipo de Archivo (Extensión)', array( $this, 'render_filetype_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
+        add_settings_field( 'agt_format_field', 'Formato de Imagen', array( $this, 'render_format_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
         add_settings_field( 'agt_size_field', 'Tamaño Mínimo', array( $this, 'render_size_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
-        add_settings_field( 'agt_format_field', 'Orientación', array( $this, 'render_format_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
+        add_settings_field( 'agt_type_field', 'Tipo de Imagen', array( $this, 'render_type_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
+
+        // --- NUEVA SECCIÓN: OVERLAY (CANVAS) ---
+        add_settings_section( 'agt_overlay_section', 'Edición de Imagen (Texto sobre imagen)', null, 'auto-google-thumbnail-settings' );
+        add_settings_field( 'agt_overlay_enable_field', 'Activar Superposición', array( $this, 'render_overlay_enable_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
+        add_settings_field( 'agt_overlay_bg_color_field', 'Color de Fondo (Capa)', array( $this, 'render_overlay_bg_color_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
+        add_settings_field( 'agt_overlay_opacity_field', 'Opacidad del Fondo (%)', array( $this, 'render_overlay_opacity_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
+        add_settings_field( 'agt_overlay_text_color_field', 'Color del Texto', array( $this, 'render_overlay_text_color_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
+        add_settings_field( 'agt_overlay_font_family_field', 'Fuente (Google Fonts)', array( $this, 'render_overlay_font_family_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
+        add_settings_field( 'agt_overlay_font_size_field', 'Tamaño de Fuente (Máx)', array( $this, 'render_overlay_font_size_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
     }
-
-    /**
-     * Limpia y valida los datos antes de guardarlos en la base de datos
-     */
-    public function sanitize_settings( $input ) {
-        $input['agt_enable'] = isset( $input['agt_enable'] ) ? 1 : 0;
-        $input['agt_overlay_enable'] = isset( $input['agt_overlay_enable'] ) ? 1 : 0;
-        
-        // Validar tamaño de fuente (entre 10 y 150 px)
-        $input['agt_font_size'] = absint( $input['agt_font_size'] );
-        if ( $input['agt_font_size'] < 10 ) $input['agt_font_size'] = 10;
-        if ( $input['agt_font_size'] > 150 ) $input['agt_font_size'] = 150;
-
-        // Validar opacidad (0 a 100)
-        $input['agt_overlay_opacity'] = absint( $input['agt_overlay_opacity'] );
-        if ( $input['agt_overlay_opacity'] > 100 ) $input['agt_overlay_opacity'] = 100;
-
-        // Validar color hexadecimal
-        $input['agt_font_color'] = sanitize_hex_color( $input['agt_font_color'] );
-        
-        return $input;
-    }
-
-    public function design_section_info() {
-        echo '<p>Personaliza la apariencia. La fuente elegida se descargará automáticamente a tu servidor la primera vez que se use.</p>';
-    }
-
+    
     public function render_enable_field() {
         $options = get_option('agt_settings');
-        echo '<input type="checkbox" name="agt_settings[agt_enable]" value="1" ' . checked( 1, $options['agt_enable'] ?? 0, false ) . ' />';
-        echo '<p class="description">Marcar para activar la búsqueda automática.</p>';
+        $checked = $options['agt_enable'] ?? 0;
+        echo '<input type="checkbox" name="agt_settings[agt_enable]" value="1" ' . checked( 1, $checked, false ) . ' />';
+        echo '<p class="description">Marcar para activar la generación automática.</p>';
     }
 
-    public function render_overlay_enable_field() {
+    public function render_selection_field() {
         $options = get_option('agt_settings');
-        echo '<input type="checkbox" name="agt_settings[agt_overlay_enable]" value="1" ' . checked( 1, $options['agt_overlay_enable'] ?? 0, false ) . ' />';
-        echo '<p class="description">Si se activa, se aplicará una capa oscura y se escribirá el título sobre la imagen.</p>';
-    }
-
-    public function render_font_family_field() {
-        $options = get_option('agt_settings');
-        $selected = $options['agt_font_family'] ?? 'Roboto';
-        // Lista de fuentes seguras de Google Fonts
-        $fonts = [
-            'Roboto' => 'Roboto (Moderna y Estándar)',
-            'Open Sans' => 'Open Sans (Limpia y Legible)',
-            'Montserrat' => 'Montserrat (Geométrica y Elegante)',
-            'Lato' => 'Lato (Equilibrada)',
-            'Oswald' => 'Oswald (Estilo Titular/Poster)',
-            'Merriweather' => 'Merriweather (Clásica con Serifa)',
-            'Anton' => 'Anton (Impactante y Gruesa)'
-        ];
-        echo '<select name="agt_settings[agt_font_family]">';
-        foreach ( $fonts as $key => $label ) {
-            echo '<option value="' . esc_attr( $key ) . '" ' . selected( $selected, $key, false ) . '>' . esc_html( $label ) . '</option>';
+        $selected = $options['agt_selection'] ?? 'first';
+        $selections = [ 'Primera imagen encontrada' => 'first', 'Imagen aleatoria' => 'random' ];
+        echo '<select name="agt_settings[agt_selection]">';
+        foreach ( $selections as $label => $value ) {
+            echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
         }
         echo '</select>';
     }
 
-    public function render_font_size_field() {
+    public function render_language_field() {
         $options = get_option('agt_settings');
-        $val = $options['agt_font_size'] ?? 50;
-        echo '<input type="number" name="agt_settings[agt_font_size]" value="' . esc_attr( $val ) . '" min="10" max="150" step="1" />';
-        echo '<p class="description">Tamaño en píxeles. Recomendado entre 40 y 80.</p>';
+        $selected = $options['agt_language'] ?? 'es';
+        $languages = [ 'Español' => 'es', 'Inglés' => 'en', 'Francés' => 'fr', 'Alemán' => 'de', 'Italiano' => 'it', 'Portugués' => 'pt', 'Catalán' => 'ca', 'Vasco' => 'eu', 'Gallego' => 'gl' ];
+        echo '<select name="agt_settings[agt_language]">';
+        foreach ( $languages as $label => $value ) {
+            echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
+        }
+        echo '</select>';
     }
 
-    public function render_font_color_field() {
+    public function render_rights_field() {
         $options = get_option('agt_settings');
-        $val = $options['agt_font_color'] ?? '#ffffff';
-        // Clase 'agt-color-field' activa el selector de color de WP
-        echo '<input type="text" name="agt_settings[agt_font_color]" value="' . esc_attr( $val ) . '" class="agt-color-field" />';
+        $selected = $options['agt_rights'] ?? 'fmc';
+        $rights = [ 'Reutilización con modificación' => 'fmc', 'Reutilización' => 'fc', 'Reutilización no comercial con modificación' => 'fm', 'Reutilización no comercial' => 'f', 'Sin filtrar (¡NO RECOMENDADO!)' => '' ];
+        echo '<select name="agt_settings[agt_rights]">';
+        foreach ( $rights as $label => $value ) {
+            echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
+        }
+        echo '</select>';
+    }
+    
+    public function render_filetype_field() {
+        $options = get_option('agt_settings');
+        $selected = $options['agt_filetype'] ?? 'all';
+        $filetypes = [
+            'Cualquier tipo' => 'all',
+            'JPG' => 'jpg',
+            'PNG' => 'png',
+            'WEBP' => 'webp'
+        ];
+        echo '<select name="agt_settings[agt_filetype]">';
+        foreach ( $filetypes as $label => $value ) {
+            echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
+        }
+        echo '</select>';
+        echo '<p class="description">Filtra los resultados para obtener un tipo de archivo de imagen específico.</p>';
+    }
+
+    public function render_format_field() {
+        $options = get_option('agt_settings');
+        $selected = $options['agt_format'] ?? '';
+        $formats = [ 'Cualquier formato' => '', 'Horizontal' => 'w', 'Vertical' => 't', 'Cuadrada' => 's', 'Panorámica' => 'xw' ];
+        echo '<select name="agt_settings[agt_format]">';
+        foreach ( $formats as $label => $value ) {
+            echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
+        }
+        echo '</select>';
+    }
+
+    public function render_size_field() {
+        $options = get_option('agt_settings');
+        $selected = $options['agt_size'] ?? '';
+        $sizes = [ 'Cualquier tamaño' => '', 'Grande' => 'l', 'Mediana' => 'm', 'Icono' => 'i', 'Mayor de 800x600' => 'lt,islt:svga', 'Mayor de 1024x768' => 'lt,islt:xga', 'Mayor de 2 MP' => 'lt,islt:2mp', 'Mayor de 4 MP' => 'lt,islt:4mp' ];
+        echo '<select name="agt_settings[agt_size]">';
+        foreach ( $sizes as $label => $value ) {
+            echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
+        }
+        echo '</select>';
+    }
+
+    public function render_type_field() {
+        $options = get_option('agt_settings');
+        $selected = $options['agt_type'] ?? '';
+        $types = [ 'Cualquier tipo' => '', 'Fotografía' => 'photo', 'Clipart' => 'clipart', 'Dibujo lineal' => 'lineart', 'Rostro' => 'face', 'Animada (GIF)' => 'animated' ];
+        echo '<select name="agt_settings[agt_type]">';
+        foreach ( $types as $label => $value ) {
+            echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
+        }
+        echo '</select>';
+    }
+
+    // --- NUEVAS FUNCIONES DE RENDERIZADO (OVERLAY) ---
+
+    public function render_overlay_enable_field() {
+        $options = get_option('agt_settings');
+        $checked = $options['agt_overlay_enable'] ?? 0;
+        echo '<input type="checkbox" name="agt_settings[agt_overlay_enable]" value="1" ' . checked( 1, $checked, false ) . ' />';
+        echo '<p class="description">Si se activa, se oscurecerá la imagen y se escribirá el título encima.</p>';
+    }
+
+    public function render_overlay_bg_color_field() {
+        $options = get_option('agt_settings');
+        $value = $options['agt_overlay_bg_color'] ?? '#000000';
+        echo '<input type="color" name="agt_settings[agt_overlay_bg_color]" value="' . esc_attr($value) . '" />';
     }
 
     public function render_overlay_opacity_field() {
         $options = get_option('agt_settings');
-        $val = $options['agt_overlay_opacity'] ?? 50;
-        echo '<div style="display: flex; align-items: center; gap: 10px;">';
-        echo '<input type="range" name="agt_settings[agt_overlay_opacity]" value="' . esc_attr( $val ) . '" min="0" max="100" step="5" oninput="this.nextElementSibling.value = this.value + \'%\'" />';
-        echo '<output style="font-weight: bold;">' . esc_attr( $val ) . '%</output>';
-        echo '</div>';
-        echo '<p class="description">0% = Transparente, 100% = Totalmente negro.</p>';
+        $value = $options['agt_overlay_opacity'] ?? '50';
+        echo '<input type="number" name="agt_settings[agt_overlay_opacity]" value="' . esc_attr($value) . '" min="0" max="100" step="1" />';
+        echo '<p class="description">Porcentaje de opacidad del fondo (0 = transparente, 100 = sólido).</p>';
     }
 
-    // --- RENDERIZADO DE FILTROS (Sin cambios importantes) ---
-    public function render_selection_field() {
+    public function render_overlay_text_color_field() {
         $options = get_option('agt_settings');
-        $selected = $options['agt_selection'] ?? 'first';
-        echo '<select name="agt_settings[agt_selection]"><option value="first" '.selected($selected,'first',false).'>Primera imagen</option><option value="random" '.selected($selected,'random',false).'>Aleatoria</option></select>';
+        $value = $options['agt_overlay_text_color'] ?? '#FFFFFF';
+        echo '<input type="color" name="agt_settings[agt_overlay_text_color]" value="' . esc_attr($value) . '" />';
     }
-    public function render_language_field() {
+
+    public function render_overlay_font_family_field() {
         $options = get_option('agt_settings');
-        $val = $options['agt_language'] ?? 'es';
-        $langs = ['es'=>'Español','en'=>'Inglés','fr'=>'Francés','de'=>'Alemán','it'=>'Italiano','pt'=>'Portugués'];
-        echo '<select name="agt_settings[agt_language]">';
-        foreach($langs as $k=>$v) echo '<option value="'.$k.'" '.selected($val,$k,false).'>'.$v.'</option>';
+        $selected = $options['agt_overlay_font_family'] ?? 'Roboto';
+        $fonts = [ 
+            'Roboto' => 'Roboto', 
+            'Open Sans' => 'Open Sans', 
+            'Lato' => 'Lato', 
+            'Oswald' => 'Oswald', 
+            'Montserrat' => 'Montserrat'
+        ];
+        echo '<select name="agt_settings[agt_overlay_font_family]">';
+        foreach ( $fonts as $label => $value ) {
+            echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
+        }
         echo '</select>';
+        echo '<p class="description">La fuente se descargará automáticamente de Google Fonts al generar la imagen.</p>';
     }
-    public function render_rights_field() {
+
+    public function render_overlay_font_size_field() {
         $options = get_option('agt_settings');
-        $val = $options['agt_rights'] ?? 'fmc';
-        $rights = ['fmc'=>'Reutilización con mod.','fc'=>'Reutilización',''=>'Cualquiera (Riesgo)'];
-        echo '<select name="agt_settings[agt_rights]">';
-        foreach($rights as $k=>$v) echo '<option value="'.$k.'" '.selected($val,$k,false).'>'.$v.'</option>';
-        echo '</select>';
-    }
-    public function render_filetype_field() {
-        $options = get_option('agt_settings');
-        $val = $options['agt_filetype'] ?? 'all';
-        $types = ['all'=>'Cualquiera','jpg'=>'JPG','png'=>'PNG','webp'=>'WEBP'];
-        echo '<select name="agt_settings[agt_filetype]">';
-        foreach($types as $k=>$v) echo '<option value="'.$k.'" '.selected($val,$k,false).'>'.$v.'</option>';
-        echo '</select>';
-    }
-    public function render_size_field() {
-        $options = get_option('agt_settings');
-        $val = $options['agt_size'] ?? 'l';
-        $sizes = [''=>'Cualquiera','l'=>'Grande','m'=>'Mediana','lt,islt:xga'=>'Mayor que XGA'];
-        echo '<select name="agt_settings[agt_size]">';
-        foreach($sizes as $k=>$v) echo '<option value="'.$k.'" '.selected($val,$k,false).'>'.$v.'</option>';
-        echo '</select>';
-    }
-    public function render_format_field() {
-        $options = get_option('agt_settings');
-        $val = $options['agt_format'] ?? '';
-        $formats = [''=>'Cualquiera','w'=>'Horizontal','t'=>'Vertical','s'=>'Cuadrada'];
-        echo '<select name="agt_settings[agt_format]">';
-        foreach($formats as $k=>$v) echo '<option value="'.$k.'" '.selected($val,$k,false).'>'.$v.'</option>';
-        echo '</select>';
+        $value = $options['agt_overlay_font_size'] ?? '40';
+        echo '<input type="number" name="agt_settings[agt_overlay_font_size]" value="' . esc_attr($value) . '" min="10" max="200" />';
+        echo '<p class="description">Tamaño máximo de la fuente en píxeles.</p>';
     }
 }
+
 new AGT_Admin_Pages();

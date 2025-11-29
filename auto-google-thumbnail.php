@@ -2,10 +2,13 @@
 /**
  * Plugin Name:       Auto Thumbnail for WordPress
  * Plugin URI:        https://github.com/amurillogarrido/auto-thumbnail-for-wordpress
- * Description:       Genera imágenes destacadas automáticamente desde Google y crea portadas profesionales con texto.
+ * Description:       Establece automáticamente una imagen destacada desde Google Imágenes basándose en el título de la entrada.
  * Version:           1.0.6
  * Author:            Alberto Murillo
- * Text Domain:       auto-google-thumbnail
+ * Author URI:        https://albertomurillo.pro/
+ * License:           GPL-2.0+
+ * License URI:       http://www.gnu.org/licenses/gpl-2.0.txt
+ * Text Domain:       auto-thumbnail-for-wordpress
  */
 
 if ( ! defined( 'WPINC' ) ) {
@@ -31,207 +34,448 @@ class Auto_Google_Thumbnail {
     }
 
     public function filter_request_args( $args, $url ) {
-        // Desactivamos verificación SSL para Google Imágenes y para descargar fuentes de GitHub
-        $args['sslverify'] = false;
+        $extensiones_imagen = array( 'jpg', 'jpeg', 'png', 'gif', 'webp', 'ico', 'bmp', 'svg' );
+        $path = parse_url( $url, PHP_URL_PATH );
+        $ext  = strtolower( pathinfo( $path, PATHINFO_EXTENSION ) );
+
+        $is_google_search   = strpos( $url, 'google.com/search?tbm=isch' ) !== false;
+        $is_image_download  = in_array( $ext, $extensiones_imagen );
+        
+        // Permitir descarga de fuentes de github/google fonts para el overlay sin verificar SSL
+        $is_font_download   = strpos( $url, 'github.com/google/fonts' ) !== false || strpos( $url, 'raw.githubusercontent.com' ) !== false;
+
+        if ( $is_google_search || $is_image_download || $is_font_download ) {
+            $args['sslverify'] = false;
+        }
+
         return $args;
     }
 
+    /**
+     * Registra un mensaje en el log de actividad (opción 'agt_activity_log').
+     *
+     * @param string $message El mensaje a registrar.
+     * @param string $type    Tipo de mensaje: 'INFO', 'SUCCESS' o 'ERROR'.
+     */
     private function log_message( $message, $type = 'INFO' ) {
         $log = get_option( 'agt_activity_log', array() );
+
         array_unshift( $log, array(
             'date'    => current_time( 'mysql' ),
             'message' => $message,
             'type'    => $type,
         ) );
-        if ( count( $log ) > 100 ) $log = array_slice( $log, 0, 100 );
+
+        if ( count( $log ) > 100 ) {
+            $log = array_slice( $log, 0, 100 );
+        }
+
         update_option( 'agt_activity_log', $log );
     }
 
-    public function on_save_post( $post_id, $post ) {
-        if ( get_post_type( $post_id ) !== 'post' ) return;
-        if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) return;
+   /**
+    * Se ejecuta cuando se guarda un post. Decide si generar la imagen destacada.
+    *
+    * @param int     $post_id ID del post guardado.
+    * @param WP_Post $post    Objeto del post guardado.
+    */
+   public function on_save_post( $post_id, $post ) {
+        // Si no es una entrada ('post'), no hacemos nada.
+        if ( get_post_type( $post_id ) !== 'post' ) {
+            return; 
+        }
+
+        // Comprobaciones existentes (revisiones, auto-guardados)
+        if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
+            return;
+        }
+
+        // El resto de la lógica solo se ejecutará si es un 'post'
         $this->set_featured_image_from_google( $post_id );
     }
 
+
     public function handle_ajax_generation() {
         check_ajax_referer( 'agt_bulk_nonce', 'nonce' );
-        if ( ! current_user_can( 'manage_options' ) ) wp_send_json_error( 'Sin permisos.' );
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_send_json_error( __( 'No tienes permisos.', 'auto-google-thumbnail' ) );
+        }
 
         $post_id = isset( $_POST['post_id'] ) ? absint( $_POST['post_id'] ) : 0;
-        if ( ! $post_id || get_post_type($post_id) !== 'post' ) wp_send_json_error( 'ID inválido.' );
+        if ( ! $post_id ) {
+            wp_send_json_error( __( 'ID de post no válido.', 'auto-google-thumbnail' ) );
+        }
+        
+        // Asegurarnos de que el AJAX solo procese posts
+        if ( get_post_type( $post_id ) !== 'post' ) {
+             wp_send_json_error( __( 'Este ID no corresponde a una entrada.', 'auto-google-thumbnail' ) );
+        }
 
         $result = $this->set_featured_image_from_google( $post_id );
 
         if ( $result ) {
-            wp_send_json_success( array( 'thumbnail_url' => get_the_post_thumbnail_url( $post_id, 'thumbnail' ) ) );
+            $thumb_url = get_the_post_thumbnail_url( $post_id, 'thumbnail' );
+            wp_send_json_success( array( 'thumbnail_url' => $thumb_url ) );
         } else {
-            wp_send_json_error( 'Fallo al generar. Ver log.' );
+            wp_send_json_error( __( 'No se pudo generar la imagen. Revisa el registro de actividad.', 'auto-google-thumbnail' ) );
         }
     }
 
+    /**
+     * Intenta asignar automáticamente una imagen destacada al post indicado.
+     *
+     * @param int $post_id ID del post.
+     * @return bool True si se asignó con éxito, false en caso contrario.
+     */
     public function set_featured_image_from_google( $post_id ) {
-        if ( has_post_thumbnail( $post_id ) ) return false;
+        // Comprobaciones iniciales (revisiones, autosaves)
+        if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
+            return false;
+        }
+        
+        // Volvemos a asegurar que solo procesamos 'post'
+        if ( get_post_type( $post_id ) !== 'post' ) {
+            $this->log_message( sprintf(
+                __( 'Proceso abortado: El ID %d no es una entrada (es %s).', 'auto-google-thumbnail' ),
+                $post_id,
+                get_post_type( $post_id )
+            ), 'INFO' );
+            return false;
+        }
 
-        $options = get_option( 'agt_settings', array() );
-        if ( empty( $options['agt_enable'] ) ) return false;
+        $post_status = get_post_status( $post_id );
+        $allowed     = array( 'publish', 'future', 'private' );
+        if ( ! in_array( $post_status, $allowed, true ) ) {
+             $this->log_message( sprintf(
+                __( 'Proceso abortado para Post ID: %d. Estado no permitido (%s).', 'auto-google-thumbnail' ),
+                $post_id,
+                $post_status
+            ), 'INFO' );
+            return false; // No procesar borradores, pendientes, etc.
+        }
+
+        $this->log_message( sprintf(
+            __( 'Iniciando proceso para Entrada ID: %d (Estado: %s).', 'auto-google-thumbnail' ),
+            $post_id,
+            $post_status
+        ) );
+
+        if ( has_post_thumbnail( $post_id ) ) {
+            $this->log_message( __( 'Proceso abortado: La entrada ya tiene una imagen destacada.', 'auto-google-thumbnail' ), 'INFO' );
+            return false;
+        }
+
+        $defaults = array(
+            'agt_enable'    => 0,
+            'agt_filetype'  => 'all',
+            'agt_rights'    => '',
+            'agt_size'      => '',
+            'agt_format'    => '',
+            'agt_type'      => '',
+            'agt_language'  => 'es',
+            'agt_selection' => 'first',
+            // Valores por defecto overlay
+            'agt_overlay_enable' => 0,
+            'agt_overlay_bg_color' => '#000000',
+            'agt_overlay_opacity' => '50',
+            'agt_overlay_text_color' => '#FFFFFF',
+            'agt_overlay_font_family' => 'Roboto',
+            'agt_overlay_font_size' => '40',
+        );
+        $options  = wp_parse_args( get_option( 'agt_settings', array() ), $defaults );
+
+        if ( empty( $options['agt_enable'] ) ) {
+            $this->log_message( __( 'Proceso abortado: El plugin está desactivado en los ajustes.', 'auto-google-thumbnail' ), 'INFO' );
+            return false;
+        }
 
         $search_term = get_the_title( $post_id );
-        $this->log_message( "Buscando imagen para: $search_term" );
+        if ( empty( $search_term ) ) {
+            $this->log_message( __( 'Proceso abortado: La entrada no tiene título.', 'auto-google-thumbnail' ), 'ERROR' );
+            return false;
+        }
 
-        // Configurar Query
-        $q_param = $search_term;
-        if ( !empty($options['agt_filetype']) && $options['agt_filetype'] !== 'all' ) {
-            $q_param .= ' filetype:' . $options['agt_filetype'];
+        $filetype_filter = $options['agt_filetype'];
+        if ( 'all' !== $filetype_filter ) {
+            $search_term .= ' filetype:' . $filetype_filter;
+        }
+
+        $this->log_message( sprintf(
+            __( 'Término de búsqueda obtenido: \'%s\'.', 'auto-google-thumbnail' ),
+            $search_term
+        ) );
+
+        $tbs_parts = array();
+        if ( ! empty( $options['agt_rights'] ) ) {
+            $tbs_parts[] = 'sur:' . $options['agt_rights'];
+        }
+        if ( ! empty( $options['agt_size'] ) ) {
+            $tbs_parts[] = 'isz:' . $options['agt_size'];
+        }
+        if ( ! empty( $options['agt_format'] ) ) {
+            $tbs_parts[] = 'iar:' . $options['agt_format'];
+        }
+        if ( ! empty( $options['agt_type'] ) ) {
+            $tbs_parts[] = 'itp:' . $options['agt_type'];
         }
 
         $query_args = array(
-            'q'   => $q_param,
+            'q'   => $search_term,
             'tbm' => 'isch',
-            'hl'  => $options['agt_language'] ?? 'es',
+            'hl'  => $options['agt_language'],
         );
+        if ( ! empty( $tbs_parts ) ) {
+            $query_args['tbs'] = implode( ',', $tbs_parts );
+        }
 
-        // Filtros TBS
-        $tbs = [];
-        if(!empty($options['agt_rights'])) $tbs[] = 'sur:'.$options['agt_rights'];
-        if(!empty($options['agt_size'])) $tbs[] = 'isz:'.$options['agt_size'];
-        if(!empty($options['agt_format'])) $tbs[] = 'iar:'.$options['agt_format'];
-        if(!empty($tbs)) $query_args['tbs'] = implode(',', $tbs);
+        $search_url = add_query_arg( $query_args, 'https://www.google.com/search' );
+        $this->log_message( sprintf(
+            __( 'URL de Google construida: %s', 'auto-google-thumbnail' ),
+            $search_url
+        ) );
 
-        $url = add_query_arg( $query_args, 'https://www.google.com/search' );
-        
-        // User Agent móvil moderno
+        // --- USER AGENTS ROTATIVOS ---
+        $user_agents = array(
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0'
+        );
+        $random_ua = $user_agents[ array_rand( $user_agents ) ];
+
         $args = array(
-            'user-agent' => 'Mozilla/5.0 (Linux; Android 10; SM-G960F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.101 Mobile Safari/537.36',
+            'user-agent' => $random_ua,
+            'sslverify'  => false,
             'timeout'    => 15,
-            'sslverify'  => false
         );
 
-        $response = wp_remote_get( $url, $args );
-        if ( is_wp_error( $response ) ) {
-            $this->log_message( "Error Google: " . $response->get_error_message(), 'ERROR' );
+        $this->log_message( __( 'Enviando petición a Google...', 'auto-google-thumbnail' ) );
+        $response = wp_remote_get( $search_url, $args );
+        if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) !== 200 ) {
+            $code = is_wp_error( $response )
+                ? $response->get_error_message()
+                : wp_remote_retrieve_response_code( $response );
+            $this->log_message( sprintf(
+                __( 'Error en la petición a Google. Código/razón: %s', 'auto-google-thumbnail' ),
+                $code
+            ), 'ERROR' );
             return false;
         }
 
-        $body = wp_remote_retrieve_body( $response );
-        
-        // Extracción de imágenes
-        preg_match_all( '/data-ou="(http[^"]+)"/', $body, $matches );
-        if(empty($matches[1])) {
-            preg_match_all( '/https?:\/\/[^"]+\.(jpg|jpeg|png|webp)/i', $body, $matches_secondary );
-            $candidates = !empty($matches_secondary[0]) ? $matches_secondary[0] : [];
+        $html_body = wp_remote_retrieve_body( $response );
+        preg_match_all( '/data-ou="(http[^"]*)"/', $html_body, $matches );
+        if ( empty( $matches[1] ) ) {
+            $this->log_message( __( 'No se encontraron imágenes en la respuesta de Google.', 'auto-google-thumbnail' ), 'ERROR' );
+            return false;
+        }
+
+        $candidates = $matches[1];
+        $this->log_message( sprintf(
+            __( 'Se encontraron %d imágenes candidatas iniciales.', 'auto-google-thumbnail' ),
+            count( $candidates )
+        ) );
+
+        if ( 'all' !== $filetype_filter ) {
+            $filtered = array();
+            foreach ( $candidates as $url ) {
+                $ext = strtolower( pathinfo( parse_url( $url, PHP_URL_PATH ), PATHINFO_EXTENSION ) );
+                if ( $ext === $filetype_filter ) {
+                    $filtered[] = $url;
+                }
+            }
+            $candidates = $filtered;
+            $this->log_message( sprintf(
+                __( "Tras filtrar por '.%s', quedan %d imágenes.", 'auto-google-thumbnail' ),
+                $filetype_filter,
+                count( $candidates )
+            ) );
+            if ( empty( $candidates ) ) {
+                $this->log_message( __( 'Ninguna imagen candidata superó el filtro de tipo de archivo.', 'auto-google-thumbnail' ), 'ERROR' );
+                return false;
+            }
+        }
+
+        if ( 'random' === $options['agt_selection'] && count( $candidates ) > 1 ) {
+            $random_key = array_rand( $candidates );
+            $ordered = array( $candidates[ $random_key ] );
+            foreach ( $candidates as $i => $u ) {
+                if ( $i !== $random_key ) {
+                    $ordered[] = $u;
+                }
+            }
         } else {
-            $candidates = $matches[1];
+            $ordered = $candidates;
         }
-
-        if ( empty( $candidates ) ) {
-            $this->log_message( "No se encontraron imágenes.", 'ERROR' );
-            return false;
-        }
-
-        if ( ($options['agt_selection'] ?? 'first') === 'random' ) shuffle($candidates);
 
         require_once ABSPATH . 'wp-admin/includes/media.php';
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
 
-        foreach ( $candidates as $img_url ) {
-            $img_url = urldecode($img_url);
-            
-            // Descarga temporal
-            $tmp_file = download_url( $img_url );
-            if ( is_wp_error( $tmp_file ) ) continue;
+        foreach ( $ordered as $url ) {
+            $url = trim( $url );
 
-            // --- PROCESADO DE PORTADA (Lógica Nueva) ---
-            // Solo procesamos si la opción 'agt_overlay_enable' está marcada en admin-settings.php
-            if ( !empty($options['agt_overlay_enable']) ) {
-                $this->process_image_overlay( $tmp_file, $search_term, $options );
+            if ( preg_match( '/_next\/image\?url=([^&]+)/', $url, $m ) ) {
+                $decoded_url = urldecode( $m[1] );
+                if ( filter_var( $decoded_url, FILTER_VALIDATE_URL ) ) {
+                    $url = $decoded_url;
+                }
             }
-            // -------------------------------------------
 
-            $file_type = wp_check_filetype( $img_url );
-            $ext = $file_type['ext'] ? $file_type['ext'] : 'jpg';
+            if ( strpos( $url, 'lookaside.fbsbx.com' ) !== false ) {
+                continue;
+            }
+
+            // Descargar la imagen a temporal
+            $tmp_file = download_url( $url );
+            if ( is_wp_error( $tmp_file ) ) {
+                $this->log_message( sprintf(
+                    __( 'download_url falló para %s: %s', 'auto-google-thumbnail' ),
+                    $url,
+                    $tmp_file->get_error_message()
+                ), 'ERROR' );
+                continue;
+            }
+
+            // --- PROCESAMIENTO OVERLAY (CANVAS) ---
+            if ( !empty($options['agt_overlay_enable']) ) {
+                $titulo_entrada = get_the_title( $post_id );
+                $processed = $this->process_image_overlay( $tmp_file, $titulo_entrada, $options );
+                
+                if ( ! $processed ) {
+                    $this->log_message( __( 'Error aplicando overlay/texto. Usando imagen original.', 'auto-google-thumbnail' ), 'INFO' );
+                } else {
+                    $this->log_message( __( 'Overlay y texto aplicados correctamente.', 'auto-google-thumbnail' ), 'SUCCESS' );
+                }
+            }
+            // --------------------------------------
+
+            // Obtener extensión real (después del procesado, siempre es JPG si se procesó)
+            $path     = parse_url( $url, PHP_URL_PATH );
+            $ext      = strtolower( pathinfo( $path, PATHINFO_EXTENSION ) );
             
+            // Si procesamos el overlay, convertimos a JPG internamente
+            if ( !empty($options['agt_overlay_enable']) ) {
+                $ext = 'jpg';
+            } else {
+                 // Validar extensión original si no usamos overlay
+                 if ( ! in_array( $ext, array( 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp' ), true ) ) {
+                    $ext = 'jpg'; 
+                 }
+            }
+
             $file_array = array(
                 'name'     => sanitize_file_name( $search_term ) . '.' . $ext,
                 'tmp_name' => $tmp_file,
             );
 
             $attach_id = media_handle_sideload( $file_array, $post_id, $search_term );
-
             if ( is_wp_error( $attach_id ) ) {
                 @unlink( $tmp_file );
-                $this->log_message( "Error guardando: " . $attach_id->get_error_message(), 'ERROR' );
+                $this->log_message( sprintf(
+                    __( 'media_handle_sideload falló para %s: %s', 'auto-google-thumbnail' ),
+                    $url,
+                    $attach_id->get_error_message()
+                ), 'ERROR' );
                 continue;
             }
 
             set_post_thumbnail( $post_id, $attach_id );
-            $this->log_message( "Imagen asignada (ID: $attach_id)", 'SUCCESS' );
+            update_post_meta( $attach_id, '_wp_attachment_image_alt', $search_term );
+
+            $this->log_message( sprintf(
+                __( '¡ÉXITO! Imagen generada y asignada a la entrada (ID de adjunto: %d).', 'auto-google-thumbnail' ),
+                $attach_id
+            ), 'SUCCESS' );
+
             return true;
         }
 
-        $this->log_message( "No se pudo procesar ninguna imagen.", 'ERROR' );
+        $this->log_message( __( 'Ninguna URL candidata pudo descargarse correctamente.', 'auto-google-thumbnail' ), 'ERROR' );
         return false;
     }
 
     /**
-     * Aplica capa oscura y texto TTF sobre la imagen usando GD.
+     * Aplica "Canvas" Server-Side: Overlay oscuro + Texto centrado usando GD
+     * * @param string $file_path Ruta local del archivo temporal de imagen.
+     * @param string $text      Texto a escribir (título).
+     * @param array  $options   Opciones del plugin.
+     * @return bool True si éxito, False si falló.
      */
     private function process_image_overlay( $file_path, $text, $options ) {
-        $info = @getimagesize( $file_path );
-        if ( !$info ) return;
+        $info = getimagesize( $file_path );
+        if ( ! $info ) return false;
 
-        $width  = $info[0];
+        $mime = $info['mime'];
+        $width = $info[0];
         $height = $info[1];
-        $mime   = $info['mime'];
 
+        // Crear recurso de imagen según tipo
         switch ( $mime ) {
-            case 'image/jpeg': $im = @imagecreatefromjpeg( $file_path ); break;
-            case 'image/png':  $im = @imagecreatefrompng( $file_path ); break;
-            case 'image/gif':  $im = @imagecreatefromgif( $file_path ); break;
-            case 'image/webp': $im = @imagecreatefromwebp( $file_path ); break;
-            default: return;
+            case 'image/jpeg': $im = imagecreatefromjpeg( $file_path ); break;
+            case 'image/png':  $im = imagecreatefrompng( $file_path ); break;
+            case 'image/webp': $im = imagecreatefromwebp( $file_path ); break;
+            default: return false; // Formato no soportado por GD fácilmente o bmp/gif animado
         }
-        if ( !$im ) return;
+        if ( ! $im ) return false;
 
-        // 1. Capa Oscura (Opacidad configurable)
-        $opacity_pct = isset($options['agt_overlay_opacity']) ? intval($options['agt_overlay_opacity']) : 50;
-        if ( $opacity_pct > 0 ) {
-            $overlay = imagecreatetruecolor( $width, $height );
-            $black   = imagecolorallocate( $overlay, 0, 0, 0 );
-            imagefill( $overlay, 0, 0, $black );
-            imagecopymerge( $im, $overlay, 0, 0, 0, 0, $width, $height, $opacity_pct );
-            imagedestroy( $overlay );
+        // 1. Aplicar Overlay (Capa oscura)
+        $hex = $options['agt_overlay_bg_color'] ?? '#000000';
+        $opacity = intval( $options['agt_overlay_opacity'] ?? 50 ); // 0 a 100
+        
+        // Convertir Hex a RGB
+        $hex = ltrim($hex, '#');
+        if (strlen($hex) == 3) {
+            $r = hexdec(substr($hex, 0, 1) . substr($hex, 0, 1));
+            $g = hexdec(substr($hex, 1, 1) . substr($hex, 1, 1));
+            $b = hexdec(substr($hex, 2, 1) . substr($hex, 2, 1));
+        } else {
+            $r = hexdec(substr($hex, 0, 2));
+            $g = hexdec(substr($hex, 2, 2));
+            $b = hexdec(substr($hex, 4, 2));
         }
 
-        // 2. Texto con fuente TTF
-        $font_name = isset($options['agt_font_family']) ? $options['agt_font_family'] : 'Roboto';
-        $font_file = $this->get_font_path( $font_name );
+        // GD Alpha: 0 (opaco) a 127 (transparente). Convertimos input 0-100 a 0-127 invertido.
+        // Opacidad 100 (solido) -> Alpha 0. Opacidad 0 (transparente) -> Alpha 127.
+        $alpha = (int) ( ( 100 - $opacity ) * 1.27 );
+        
+        $overlay_color = imagecolorallocatealpha( $im, $r, $g, $b, $alpha );
+        imagefilledrectangle( $im, 0, 0, $width, $height, $overlay_color );
 
-        if ( $font_file && file_exists( $font_file ) ) {
-            // Tamaño
-            $size_px = isset($options['agt_font_size']) ? intval($options['agt_font_size']) : 50;
-            $size_pt = $size_px * 0.75; // GD usa puntos
-            
-            // Color
-            $hex = isset($options['agt_font_color']) ? $options['agt_font_color'] : '#ffffff';
-            $rgb = $this->hex2rgb($hex);
-            $color = imagecolorallocate( $im, $rgb[0], $rgb[1], $rgb[2] );
+        // 2. Configurar Texto y Fuente
+        $font_name = $options['agt_overlay_font_family'] ?? 'Roboto';
+        $font_file = $this->get_font_file( $font_name ); // Descarga o recupera ruta TTF
+        $font_size = intval( $options['agt_overlay_font_size'] ?? 40 );
+        
+        $text_hex = $options['agt_overlay_text_color'] ?? '#FFFFFF';
+        $text_hex = ltrim($text_hex, '#');
+        if (strlen($text_hex) == 3) {
+            $tr = hexdec(substr($text_hex, 0, 1) . substr($text_hex, 0, 1));
+            $tg = hexdec(substr($text_hex, 1, 1) . substr($text_hex, 1, 1));
+            $tb = hexdec(substr($text_hex, 2, 1) . substr($text_hex, 2, 1));
+        } else {
+            $tr = hexdec(substr($text_hex, 0, 2));
+            $tg = hexdec(substr($text_hex, 2, 2));
+            $tb = hexdec(substr($text_hex, 4, 2));
+        }
+        $text_color = imagecolorallocate( $im, $tr, $tg, $tb );
 
-            // Wrapping y Márgenes
-            $margin = 40;
-            $max_width = $width - ($margin * 2);
-            
-            $words = explode(' ', $text);
-            $lines = [];
-            $current_line = '';
+        // 3. Word Wrap (Ajuste de líneas)
+        $words = explode( ' ', $text );
+        $lines = array();
+        $current_line = '';
+        $max_width = $width * 0.8; // Margen 10% a cada lado
 
-            // Calcular líneas
-            foreach ($words as $word) {
+        // Si la fuente no se pudo cargar, usar fuente del sistema (muy básica, sin TTF)
+        if ( ! $font_file || ! file_exists( $font_file ) ) {
+            // Fallback básico sin centrado perfecto ni fuentes custom
+             imagestring($im, 5, 10, 10, "Error fuente", $text_color);
+        } else {
+            foreach ( $words as $word ) {
                 $test_line = $current_line . ($current_line ? ' ' : '') . $word;
-                $bbox = imagettfbbox($size_pt, 0, $font_file, $test_line);
-                $text_width = $bbox[2] - $bbox[0];
-                
-                if ($text_width > $max_width && !empty($current_line)) {
+                $bbox = imagettfbbox( $font_size, 0, $font_file, $test_line );
+                $line_width = abs( $bbox[4] - $bbox[0] );
+
+                if ( $line_width > $max_width && !empty($current_line) ) {
                     $lines[] = $current_line;
                     $current_line = $word;
                 } else {
@@ -240,81 +484,73 @@ class Auto_Google_Thumbnail {
             }
             $lines[] = $current_line;
 
-            // Calcular posición vertical
-            $line_height = $size_px * 1.4;
-            $text_block_height = count($lines) * $line_height;
-            $start_y = ($height - $text_block_height) / 2 + $size_px;
+            // 4. Centrar y Dibujar Texto
+            $line_height = $font_size * 1.5;
+            $total_text_height = count($lines) * $line_height;
+            $y_start = ( $height - $total_text_height ) / 2 + $font_size; // Ajuste por baseline
 
-            // Dibujar texto
-            foreach ($lines as $i => $line ) {
-                $bbox = imagettfbbox($size_pt, 0, $font_file, $line);
-                $text_width = $bbox[2] - $bbox[0];
-                $start_x = ($width - $text_width) / 2; // Centrado horizontal
-                
-                imagettftext($im, $size_pt, 0, $start_x, $start_y + ($i * $line_height), $color, $font_file, $line);
+            foreach ( $lines as $i => $line ) {
+                $bbox = imagettfbbox( $font_size, 0, $font_file, $line );
+                $text_w = abs( $bbox[4] - $bbox[0] );
+                $x_pos = ( $width - $text_w ) / 2;
+                $y_pos = $y_start + ( $i * $line_height );
+
+                imagettftext( $im, $font_size, 0, $x_pos, $y_pos, $text_color, $font_file, $line );
             }
-        } else {
-            // Fallback por si falla la descarga de la fuente (mensaje de error en log)
-            $this->log_message("Error: Fuente no disponible ($font_name).", 'ERROR');
         }
 
-        // Guardar la imagen procesada
-        switch ( $mime ) {
-            case 'image/jpeg': imagejpeg( $im, $file_path, 90 ); break;
-            case 'image/png':  imagepng( $im, $file_path ); break;
-            case 'image/webp': imagewebp( $im, $file_path, 90 ); break;
-        }
+        // 5. Guardar sobre el archivo temporal
+        // Convertimos todo a JPG para estandarizar output
+        imagejpeg( $im, $file_path, 90 );
         imagedestroy( $im );
+
+        return true;
     }
 
     /**
-     * Descarga y cachea la fuente desde Google Fonts (GitHub Mirror).
+     * Descarga la fuente TTF si no existe localmente
      */
-    private function get_font_path( $font_name ) {
+    private function get_font_file( $font_name ) {
         $upload_dir = wp_upload_dir();
-        $fonts_dir  = $upload_dir['basedir'] . '/agt-fonts';
-        if ( ! file_exists( $fonts_dir ) ) wp_mkdir_p( $fonts_dir );
+        $font_dir = $upload_dir['basedir'] . '/agt-fonts';
+        if ( ! file_exists( $font_dir ) ) wp_mkdir_p( $font_dir );
 
-        // URLs directas a las versiones Bold de las fuentes en GitHub
-        $fonts_map = [
-            'Roboto'       => 'https://github.com/google/fonts/raw/main/apache/roboto/Roboto-Bold.ttf',
-            'Open Sans'    => 'https://github.com/google/fonts/raw/main/ofl/opensans/OpenSans-Bold.ttf',
-            'Montserrat'   => 'https://github.com/google/fonts/raw/main/ofl/montserrat/Montserrat-Bold.ttf',
-            'Lato'         => 'https://github.com/google/fonts/raw/main/ofl/lato/Lato-Bold.ttf',
-            'Oswald'       => 'https://github.com/google/fonts/raw/main/ofl/oswald/Oswald-Bold.ttf',
-            'Merriweather' => 'https://github.com/google/fonts/raw/main/ofl/merriweather/Merriweather-Bold.ttf',
-            'Anton'        => 'https://github.com/google/fonts/raw/main/ofl/anton/Anton-Regular.ttf'
+        $filename = sanitize_file_name( $font_name ) . '-Bold.ttf';
+        $local_path = $font_dir . '/' . $filename;
+
+        // Si ya la tenemos, devolver ruta
+        if ( file_exists( $local_path ) ) return $local_path;
+
+        // Mapeo básico de URLs a raw github de Google Fonts (OFL)
+        // Usamos Bold para que se vea mejor en títulos
+        $base_url = 'https://github.com/google/fonts/raw/main/';
+        $map = [
+            'Roboto'      => 'apache/roboto/static/Roboto-Bold.ttf',
+            'Open Sans'   => 'apache/opensans/static/OpenSans-Bold.ttf',
+            'Lato'        => 'ofl/lato/Lato-Bold.ttf',
+            'Oswald'      => 'ofl/oswald/static/Oswald-Bold.ttf',
+            'Montserrat'  => 'ofl/montserrat/static/Montserrat-Bold.ttf'
         ];
 
-        if ( ! isset( $fonts_map[ $font_name ] ) ) $font_name = 'Roboto';
-        $url = $fonts_map[ $font_name ];
-        $filename = sanitize_file_name( $font_name ) . '-bold.ttf';
-        $file_path = $fonts_dir . '/' . $filename;
+        // Mapeo por defecto a Roboto si no encuentra la fuente
+        $repo_path = isset($map[$font_name]) ? $map[$font_name] : $map['Roboto'];
+        $url = $base_url . $repo_path;
 
-        // Si ya existe, usamos la caché
-        if ( file_exists( $file_path ) ) return $file_path;
-
-        // Si no, descargar
-        $response = wp_remote_get( $url );
-        if ( ! is_wp_error( $response ) && wp_remote_retrieve_response_code( $response ) === 200 ) {
-            file_put_contents( $file_path, wp_remote_retrieve_body( $response ) );
-            return $file_path;
+        // Descargar
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        
+        // Usamos una función auxiliar para descargar sin verificar SSL estricto (ya filtrado en http_request_args)
+        $tmp = download_url( $url );
+        
+        if ( is_wp_error( $tmp ) ) {
+            $this->log_message( 'Error descargando fuente: ' . $tmp->get_error_message(), 'ERROR' );
+            return false;
         }
-        return false;
-    }
 
-    private function hex2rgb( $hex ) {
-        $hex = str_replace( '#', '', $hex );
-        if ( strlen( $hex ) === 3 ) {
-            $r = hexdec( substr( $hex, 0, 1 ) . substr( $hex, 0, 1 ) );
-            $g = hexdec( substr( $hex, 1, 1 ) . substr( $hex, 1, 1 ) );
-            $b = hexdec( substr( $hex, 2, 1 ) . substr( $hex, 2, 1 ) );
-        } else {
-            $r = hexdec( substr( $hex, 0, 2 ) );
-            $g = hexdec( substr( $hex, 2, 2 ) );
-            $b = hexdec( substr( $hex, 4, 2 ) );
-        }
-        return array( $r, $g, $b );
+        copy( $tmp, $local_path );
+        @unlink( $tmp );
+
+        return $local_path;
     }
 }
 

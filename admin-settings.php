@@ -122,9 +122,13 @@ class AGT_Admin_Pages {
         add_settings_field( 'agt_size_field', 'Tamaño Mínimo', array( $this, 'render_size_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
         add_settings_field( 'agt_type_field', 'Tipo de Imagen', array( $this, 'render_type_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
 
-        // --- NUEVA SECCIÓN: OVERLAY (CANVAS) ---
-        add_settings_section( 'agt_overlay_section', 'Edición de Imagen (Texto sobre imagen)', null, 'auto-google-thumbnail-settings' );
-        add_settings_field( 'agt_overlay_enable_field', 'Activar Superposición', array( $this, 'render_overlay_enable_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
+        // --- SECCIÓN: EDICIÓN DE IMAGEN (FILTROS Y OVERLAY) ---
+        add_settings_section( 'agt_overlay_section', 'Edición de Imagen (Filtros y Texto)', null, 'auto-google-thumbnail-settings' );
+        
+        // Campo nuevo para Blanco y Negro
+        add_settings_field( 'agt_grayscale_enable_field', 'Filtro Blanco y Negro', array( $this, 'render_grayscale_enable_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
+        
+        add_settings_field( 'agt_overlay_enable_field', 'Activar Superposición de Texto', array( $this, 'render_overlay_enable_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
         add_settings_field( 'agt_overlay_bg_color_field', 'Color de Fondo (Capa)', array( $this, 'render_overlay_bg_color_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
         add_settings_field( 'agt_overlay_opacity_field', 'Opacidad del Fondo (%)', array( $this, 'render_overlay_opacity_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
         add_settings_field( 'agt_overlay_text_color_field', 'Color del Texto', array( $this, 'render_overlay_text_color_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
@@ -223,6 +227,14 @@ class AGT_Admin_Pages {
     }
 
     // --- NUEVAS FUNCIONES DE RENDERIZADO (OVERLAY) ---
+
+    // Nueva función para el checkbox de Escala de Grises
+    public function render_grayscale_enable_field() {
+        $options = get_option('agt_settings');
+        $checked = $options['agt_grayscale_enable'] ?? 0;
+        echo '<input type="checkbox" name="agt_settings[agt_grayscale_enable]" value="1" ' . checked( 1, $checked, false ) . ' />';
+        echo '<p class="description">Convierte la imagen a escala de grises (blanco y negro).</p>';
+    }
 
     public function render_overlay_enable_field() {
         $options = get_option('agt_settings');

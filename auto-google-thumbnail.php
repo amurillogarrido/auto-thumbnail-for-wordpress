@@ -174,10 +174,11 @@ class Auto_Google_Thumbnail {
             'agt_type'      => '',
             'agt_language'  => 'es',
             'agt_selection' => 'first',
-            // Valores por defecto overlay
-            'agt_overlay_enable' => 0,
+            // Valores por defecto overlay y filtros
+            'agt_grayscale_enable' => 0, // Nuevo: Filtro B&N
+            'agt_overlay_enable'   => 0,
             'agt_overlay_bg_color' => '#000000',
-            'agt_overlay_opacity' => '50',
+            'agt_overlay_opacity'  => '50',
             'agt_overlay_text_color' => '#FFFFFF',
             'agt_overlay_font_family' => 'Roboto',
             'agt_overlay_font_size' => '40',
@@ -328,15 +329,16 @@ class Auto_Google_Thumbnail {
                 continue;
             }
 
-            // --- PROCESAMIENTO OVERLAY (CANVAS) ---
-            if ( !empty($options['agt_overlay_enable']) ) {
+            // --- PROCESAMIENTO DE IMAGEN (Overlay / Filtros) ---
+            // Procesamos si hay overlay O si hay filtro escala de grises
+            if ( !empty($options['agt_overlay_enable']) || !empty($options['agt_grayscale_enable']) ) {
                 $titulo_entrada = get_the_title( $post_id );
                 $processed = $this->process_image_overlay( $tmp_file, $titulo_entrada, $options );
                 
                 if ( ! $processed ) {
-                    $this->log_message( __( 'Error aplicando overlay/texto. Usando imagen original.', 'auto-google-thumbnail' ), 'INFO' );
+                    $this->log_message( __( 'Error aplicando edición de imagen. Usando imagen original.', 'auto-google-thumbnail' ), 'INFO' );
                 } else {
-                    $this->log_message( __( 'Overlay y texto aplicados correctamente.', 'auto-google-thumbnail' ), 'SUCCESS' );
+                    $this->log_message( __( 'Edición de imagen aplicada correctamente.', 'auto-google-thumbnail' ), 'SUCCESS' );
                 }
             }
             // --------------------------------------
@@ -345,11 +347,11 @@ class Auto_Google_Thumbnail {
             $path     = parse_url( $url, PHP_URL_PATH );
             $ext      = strtolower( pathinfo( $path, PATHINFO_EXTENSION ) );
             
-            // Si procesamos el overlay, convertimos a JPG internamente
-            if ( !empty($options['agt_overlay_enable']) ) {
+            // Si procesamos la imagen (overlay o filtros), convertimos a JPG internamente
+            if ( !empty($options['agt_overlay_enable']) || !empty($options['agt_grayscale_enable']) ) {
                 $ext = 'jpg';
             } else {
-                 // Validar extensión original si no usamos overlay
+                 // Validar extensión original si no usamos edición
                  if ( ! in_array( $ext, array( 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp' ), true ) ) {
                     $ext = 'jpg'; 
                  }
@@ -387,7 +389,7 @@ class Auto_Google_Thumbnail {
     }
 
     /**
-     * Aplica "Canvas" Server-Side: Overlay oscuro + Texto centrado usando GD
+     * Aplica Edición Server-Side: Filtros (B&N) + Overlay oscuro + Texto
      * * @param string $file_path Ruta local del archivo temporal de imagen.
      * @param string $text      Texto a escribir (título).
      * @param array  $options   Opciones del plugin.
@@ -410,88 +412,97 @@ class Auto_Google_Thumbnail {
         }
         if ( ! $im ) return false;
 
-        // 1. Aplicar Overlay (Capa oscura)
-        $hex = $options['agt_overlay_bg_color'] ?? '#000000';
-        $opacity = intval( $options['agt_overlay_opacity'] ?? 50 ); // 0 a 100
-        
-        // Convertir Hex a RGB
-        $hex = ltrim($hex, '#');
-        if (strlen($hex) == 3) {
-            $r = hexdec(substr($hex, 0, 1) . substr($hex, 0, 1));
-            $g = hexdec(substr($hex, 1, 1) . substr($hex, 1, 1));
-            $b = hexdec(substr($hex, 2, 1) . substr($hex, 2, 1));
-        } else {
-            $r = hexdec(substr($hex, 0, 2));
-            $g = hexdec(substr($hex, 2, 2));
-            $b = hexdec(substr($hex, 4, 2));
+        // --- APLICAR FILTRO BLANCO Y NEGRO ---
+        if ( !empty($options['agt_grayscale_enable']) ) {
+            imagefilter($im, IMG_FILTER_GRAYSCALE);
         }
 
-        // GD Alpha: 0 (opaco) a 127 (transparente). Convertimos input 0-100 a 0-127 invertido.
-        $alpha = (int) ( ( 100 - $opacity ) * 1.27 );
-        
-        $overlay_color = imagecolorallocatealpha( $im, $r, $g, $b, $alpha );
-        imagefilledrectangle( $im, 0, 0, $width, $height, $overlay_color );
+        // --- APLICAR OVERLAY DE TEXTO (Si está activado) ---
+        if ( !empty($options['agt_overlay_enable']) ) {
+            
+            // 1. Aplicar Overlay (Capa oscura)
+            $hex = $options['agt_overlay_bg_color'] ?? '#000000';
+            $opacity = intval( $options['agt_overlay_opacity'] ?? 50 ); // 0 a 100
+            
+            // Convertir Hex a RGB
+            $hex = ltrim($hex, '#');
+            if (strlen($hex) == 3) {
+                $r = hexdec(substr($hex, 0, 1) . substr($hex, 0, 1));
+                $g = hexdec(substr($hex, 1, 1) . substr($hex, 1, 1));
+                $b = hexdec(substr($hex, 2, 1) . substr($hex, 2, 1));
+            } else {
+                $r = hexdec(substr($hex, 0, 2));
+                $g = hexdec(substr($hex, 2, 2));
+                $b = hexdec(substr($hex, 4, 2));
+            }
 
-        // 2. Configurar Texto y Fuente
-        $font_name = $options['agt_overlay_font_family'] ?? 'Roboto';
-        
-        // MODIFICADO: Busca la fuente localmente en la carpeta 'fonts'
-        $font_file = $this->get_font_file( $font_name ); 
+            // GD Alpha: 0 (opaco) a 127 (transparente). Convertimos input 0-100 a 0-127 invertido.
+            $alpha = (int) ( ( 100 - $opacity ) * 1.27 );
+            
+            $overlay_color = imagecolorallocatealpha( $im, $r, $g, $b, $alpha );
+            imagefilledrectangle( $im, 0, 0, $width, $height, $overlay_color );
 
-        $font_size = intval( $options['agt_overlay_font_size'] ?? 40 );
-        
-        $text_hex = $options['agt_overlay_text_color'] ?? '#FFFFFF';
-        $text_hex = ltrim($text_hex, '#');
-        if (strlen($text_hex) == 3) {
-            $tr = hexdec(substr($text_hex, 0, 1) . substr($text_hex, 0, 1));
-            $tg = hexdec(substr($text_hex, 1, 1) . substr($text_hex, 1, 1));
-            $tb = hexdec(substr($text_hex, 2, 1) . substr($text_hex, 2, 1));
-        } else {
-            $tr = hexdec(substr($text_hex, 0, 2));
-            $tg = hexdec(substr($text_hex, 2, 2));
-            $tb = hexdec(substr($text_hex, 4, 2));
-        }
-        $text_color = imagecolorallocate( $im, $tr, $tg, $tb );
+            // 2. Configurar Texto y Fuente
+            $font_name = $options['agt_overlay_font_family'] ?? 'Roboto';
+            
+            // MODIFICADO: Busca la fuente localmente en la carpeta 'fonts'
+            $font_file = $this->get_font_file( $font_name ); 
 
-        // 3. Word Wrap (Ajuste de líneas)
-        $words = explode( ' ', $text );
-        $lines = array();
-        $current_line = '';
-        $max_width = $width * 0.8; // Margen 10% a cada lado
+            $font_size = intval( $options['agt_overlay_font_size'] ?? 40 );
+            
+            $text_hex = $options['agt_overlay_text_color'] ?? '#FFFFFF';
+            $text_hex = ltrim($text_hex, '#');
+            if (strlen($text_hex) == 3) {
+                $tr = hexdec(substr($text_hex, 0, 1) . substr($text_hex, 0, 1));
+                $tg = hexdec(substr($text_hex, 1, 1) . substr($text_hex, 1, 1));
+                $tb = hexdec(substr($text_hex, 2, 1) . substr($text_hex, 2, 1));
+            } else {
+                $tr = hexdec(substr($text_hex, 0, 2));
+                $tg = hexdec(substr($text_hex, 2, 2));
+                $tb = hexdec(substr($text_hex, 4, 2));
+            }
+            $text_color = imagecolorallocate( $im, $tr, $tg, $tb );
 
-        // Si la fuente no se pudo cargar, usar fuente del sistema
-        if ( ! $font_file || ! file_exists( $font_file ) ) {
-            // Fallback básico - Esto es lo que salía en tu imagen, significa que no encontró la fuente.
-             imagestring($im, 5, 10, 10, "Error: Sube la fuente " . $font_name . ".ttf a /fonts/", $text_color);
-        } else {
-            foreach ( $words as $word ) {
-                $test_line = $current_line . ($current_line ? ' ' : '') . $word;
-                $bbox = imagettfbbox( $font_size, 0, $font_file, $test_line );
-                $line_width = abs( $bbox[4] - $bbox[0] );
+            // 3. Word Wrap (Ajuste de líneas)
+            $words = explode( ' ', $text );
+            $lines = array();
+            $current_line = '';
+            $max_width = $width * 0.8; // Margen 10% a cada lado
 
-                if ( $line_width > $max_width && !empty($current_line) ) {
-                    $lines[] = $current_line;
-                    $current_line = $word;
-                } else {
-                    $current_line = $test_line;
+            // Si la fuente no se pudo cargar, usar fuente del sistema
+            if ( ! $font_file || ! file_exists( $font_file ) ) {
+                // Fallback básico
+                 imagestring($im, 5, 10, 10, "Error: Sube la fuente " . $font_name . ".ttf a /fonts/", $text_color);
+            } else {
+                foreach ( $words as $word ) {
+                    $test_line = $current_line . ($current_line ? ' ' : '') . $word;
+                    $bbox = imagettfbbox( $font_size, 0, $font_file, $test_line );
+                    $line_width = abs( $bbox[4] - $bbox[0] );
+
+                    if ( $line_width > $max_width && !empty($current_line) ) {
+                        $lines[] = $current_line;
+                        $current_line = $word;
+                    } else {
+                        $current_line = $test_line;
+                    }
+                }
+                $lines[] = $current_line;
+
+                // 4. Centrar y Dibujar Texto
+                $line_height = $font_size * 1.5;
+                $total_text_height = count($lines) * $line_height;
+                $y_start = ( $height - $total_text_height ) / 2 + $font_size; // Ajuste por baseline
+
+                foreach ( $lines as $i => $line ) {
+                    $bbox = imagettfbbox( $font_size, 0, $font_file, $line );
+                    $text_w = abs( $bbox[4] - $bbox[0] );
+                    $x_pos = ( $width - $text_w ) / 2;
+                    $y_pos = $y_start + ( $i * $line_height );
+
+                    imagettftext( $im, $font_size, 0, $x_pos, $y_pos, $text_color, $font_file, $line );
                 }
             }
-            $lines[] = $current_line;
-
-            // 4. Centrar y Dibujar Texto
-            $line_height = $font_size * 1.5;
-            $total_text_height = count($lines) * $line_height;
-            $y_start = ( $height - $total_text_height ) / 2 + $font_size; // Ajuste por baseline
-
-            foreach ( $lines as $i => $line ) {
-                $bbox = imagettfbbox( $font_size, 0, $font_file, $line );
-                $text_w = abs( $bbox[4] - $bbox[0] );
-                $x_pos = ( $width - $text_w ) / 2;
-                $y_pos = $y_start + ( $i * $line_height );
-
-                imagettftext( $im, $font_size, 0, $x_pos, $y_pos, $text_color, $font_file, $line );
-            }
-        }
+        } // Fin if overlay_enable
 
         // 5. Guardar sobre el archivo temporal
         // Convertimos todo a JPG para estandarizar output

@@ -174,6 +174,7 @@ class Auto_Google_Thumbnail {
             'agt_type'      => '',
             'agt_language'  => 'es',
             'agt_selection' => 'first',
+            'agt_blacklist' => '', // Nuevo campo blacklist
             // Valores por defecto overlay y filtros
             'agt_grayscale_enable' => 0, // Nuevo: Filtro B&N
             'agt_overlay_enable'   => 0,
@@ -200,6 +201,21 @@ class Auto_Google_Thumbnail {
         if ( 'all' !== $filetype_filter ) {
             $search_term .= ' filetype:' . $filetype_filter;
         }
+
+        // --- PROCESAMIENTO DE BLACKLIST ---
+        if ( ! empty( $options['agt_blacklist'] ) ) {
+            // Dividir por comas, saltos de línea o espacios
+            $domains = preg_split( '/[\s,]+/', $options['agt_blacklist'] );
+            
+            foreach ( $domains as $domain ) {
+                $domain = trim( $domain );
+                if ( ! empty( $domain ) ) {
+                    // Añadir operador de exclusión a la consulta
+                    $search_term .= ' -site:' . $domain;
+                }
+            }
+        }
+        // ----------------------------------
 
         $this->log_message( sprintf(
             __( 'Término de búsqueda obtenido: \'%s\'.', 'auto-google-thumbnail' ),

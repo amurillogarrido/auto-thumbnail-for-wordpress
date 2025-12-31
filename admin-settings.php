@@ -121,6 +121,8 @@ class AGT_Admin_Pages {
         add_settings_field( 'agt_format_field', 'Formato de Imagen', array( $this, 'render_format_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
         add_settings_field( 'agt_size_field', 'Tamaño Mínimo', array( $this, 'render_size_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
         add_settings_field( 'agt_type_field', 'Tipo de Imagen', array( $this, 'render_type_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
+        // CAMBIO: Añadido campo de Blacklist
+        add_settings_field( 'agt_blacklist_field', 'Lista Negra de Dominios', array( $this, 'render_blacklist_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
 
         // --- SECCIÓN: EDICIÓN DE IMAGEN (FILTROS Y OVERLAY) ---
         add_settings_section( 'agt_overlay_section', 'Edición de Imagen (Filtros y Texto)', null, 'auto-google-thumbnail-settings' );
@@ -224,6 +226,14 @@ class AGT_Admin_Pages {
             echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
         }
         echo '</select>';
+    }
+
+    // CAMBIO: Función para renderizar el campo de Blacklist
+    public function render_blacklist_field() {
+        $options = get_option('agt_settings');
+        $value = $options['agt_blacklist'] ?? '';
+        echo '<textarea name="agt_settings[agt_blacklist]" rows="5" cols="50" class="large-text code">' . esc_textarea( $value ) . '</textarea>';
+        echo '<p class="description">Introduce los dominios a excluir de la búsqueda (uno por línea o separados por comas). Ejemplo: <code>pinterest.com, 123rf.com</code></p>';
     }
 
     // --- NUEVAS FUNCIONES DE RENDERIZADO (OVERLAY) ---

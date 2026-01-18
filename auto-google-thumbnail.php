@@ -231,7 +231,7 @@ if ( $options['agt_selection'] === 'best' ) {
     } );
 }
 
-require_once ABSPATH . 'wp-admin/includes/file.php';0
+require_once ABSPATH . 'wp-admin/includes/file.php';
 
         foreach ( $candidates as $candidate ) {
             $url = $candidate['url'];
@@ -774,12 +774,48 @@ require_once ABSPATH . 'wp-admin/includes/file.php';0
             return array();
         }
 
-        preg_match_all( '/\["(https?:\/\/[^"]+\.(?:jpg|jpeg|png|gif|webp|bmp))"\s*,\s*(\d+)\s*,\s*(\d+)\]/i', $html, $matches, PREG_SET_ORDER );
+// --- INICIO DEL PARCHE: Búsqueda Mejorada ---
+        
+        // 1. Intento Clásico: Busca formato JSON exacto con dimensiones (por si Google vuelve al formato antiguo)
+        preg_match_all( '/\["(https?:\/\/[^"]+\.(?:jpg|jpeg|png|gif|webp|bmp))"\s*,\s*(\d+)\s*,\s*(\d+)\]/i', $html, $matches_exact, PREG_SET_ORDER );
 
+        $matches = array();
+
+        if ( !empty($matches_exact) ) {
+            // Si funciona el método exacto, lo usamos
+            $matches = $matches_exact;
+        } else {
+            // 2. Intento Agresivo: Busca cualquier URL de imagen dentro del código
+            // Esto es necesario porque Google cambia su código HTML constantemente
+            preg_match_all( '/"(https?:\/\/[^"]+?\.(?:jpg|jpeg|png|webp))"/i', $html, $matches_raw );
+            
+            if ( !empty($matches_raw[1]) ) {
+                $urls_found = array_unique($matches_raw[1]); // Eliminar duplicados
+                
+                foreach($urls_found as $url_string) {
+                    // Limpiamos la URL (decodificar caracteres unicode como \u0026 -> &)
+                    $clean_url = json_decode('"' . $url_string . '"');
+                    
+                    if ( $clean_url && filter_var($clean_url, FILTER_VALIDATE_URL) ) {
+                        // Como este método no recupera el tamaño real, inventamos un tamaño grande
+                        // para que pase el filtro de calidad posterior (que exige > 200px)
+                        $matches[] = array(
+                            $clean_url, // URL
+                            1200,       // Ancho simulado
+                            800         // Alto simulado
+                        );
+                    }
+                }
+            }
+        }
+
+        // Si después de los dos intentos sigue vacío, entonces sí fallamos
         if ( empty( $matches ) ) {
-            $this->log_message( __( 'No se encontraron URLs en Google', 'auto-google-thumbnail' ), 'ERROR' );
+            $this->log_message( __( 'No se encontraron URLs en Google (ni método exacto ni agresivo)', 'auto-google-thumbnail' ), 'ERROR' );
+            // Devuelve array vacío para que se active la imagen de respaldo (Fallback)
             return array();
         }
+        // --- FIN DEL PARCHE ---
 
         $this->log_message( sprintf( __( '%d imágenes encontradas en Google', 'auto-google-thumbnail' ), count( $matches ) ) );
         return $this->process_candidates( $matches, $options );

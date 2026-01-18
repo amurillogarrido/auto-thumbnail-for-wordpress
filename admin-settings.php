@@ -114,6 +114,8 @@ class AGT_Admin_Pages {
         add_settings_field( 'agt_enable_field', 'Activar Plugin', array( $this, 'render_enable_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         add_settings_field( 'agt_selection_field', 'Selección de Imagen', array( $this, 'render_selection_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         add_settings_field( 'agt_language_field', 'Idioma de Búsqueda', array( $this, 'render_language_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
+        add_settings_field( 'agt_search_engine_field', 'Motor de Búsqueda', array( $this, 'render_search_engine_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
+        add_settings_field( 'agt_bing_api_key_field', 'Bing API Key', array( $this, 'render_bing_api_key_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         add_settings_field( 'agt_fallback_enable_field', 'Generar Imagen de Respaldo', array( $this, 'render_fallback_enable_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         
         add_settings_section( 'agt_filter_section', 'Filtros de Búsqueda', null, 'auto-google-thumbnail-settings' );
@@ -364,6 +366,27 @@ class AGT_Admin_Pages {
         $value = $options['agt_frame_margin'] ?? '40';
         echo '<input type="number" name="agt_settings[agt_frame_margin]" value="' . esc_attr($value) . '" min="10" max="200" step="5" />';
         echo '<p class="description">Separación del marco respecto a los bordes de la imagen en píxeles. Recomendado: 40px.</p>';
+    }
+    public function render_search_engine_field() {
+        $options = get_option('agt_settings');
+        $selected = $options['agt_search_engine'] ?? 'google';
+        $engines = [ 
+            'Google Scraping (Gratis)' => 'google', 
+            'Bing API (Requiere API Key)' => 'bing'
+        ];
+        echo '<select name="agt_settings[agt_search_engine]">';
+        foreach ( $engines as $label => $value ) {
+            echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
+        }
+        echo '</select>';
+        echo '<p class="description">Google: Scraping gratuito pero puede fallar. Bing: API fiable con 1.000 búsquedas gratis/mes.</p>';
+    }
+
+    public function render_bing_api_key_field() {
+        $options = get_option('agt_settings');
+        $value = $options['agt_bing_api_key'] ?? '';
+        echo '<input type="text" name="agt_settings[agt_bing_api_key]" value="' . esc_attr($value) . '" class="regular-text" placeholder="Introduce tu API Key de Bing" />';
+        echo '<p class="description">Obtén tu API Key gratis en: <a href="https://portal.azure.com/" target="_blank">Azure Portal</a> → Crear recurso "Bing Search v7"</p>';
     }
 }
 

@@ -175,6 +175,8 @@ class Auto_Google_Thumbnail {
             'agt_language'  => 'es',
             'agt_selection' => 'first',
             'agt_blacklist' => '',
+            'agt_search_engine' => 'google', // Motor de búsqueda
+            'agt_bing_api_key'  => '', // API Key de Bing
             // Valores por defecto overlay y filtros
             'agt_grayscale_enable' => 0,
             'agt_overlay_enable'   => 0,
@@ -206,130 +208,30 @@ class Auto_Google_Thumbnail {
             return false;
         }
 
-        $this->log_message( sprintf( __( 'Término de búsqueda: "%s"', 'auto-google-thumbnail' ), $search_term ) );
+$this->log_message( sprintf( __( 'Término de búsqueda: "%s"', 'auto-google-thumbnail' ), $search_term ) );
 
-        $query_params = array(
-            'q'    => $search_term,
-            'tbm'  => 'isch',
-            'hl'   => $options['agt_language'],
-        );
+// Decidir qué motor usar
+$search_engine = $options['agt_search_engine'] ?? 'google';
 
-        if ( ! empty( $options['agt_rights'] ) ) {
-            $query_params['tbs'] = 'il:cl,sur:' . $options['agt_rights'];
-        }
-        if ( ! empty( $options['agt_size'] ) ) {
-            $query_params['tbs'] = ( isset( $query_params['tbs'] ) ? $query_params['tbs'] . ',' : '' ) . 'isz:' . $options['agt_size'];
-        }
-        if ( ! empty( $options['agt_format'] ) ) {
-            $query_params['tbs'] = ( isset( $query_params['tbs'] ) ? $query_params['tbs'] . ',' : '' ) . 'iar:' . $options['agt_format'];
-        }
-        if ( ! empty( $options['agt_type'] ) ) {
-            $query_params['tbs'] = ( isset( $query_params['tbs'] ) ? $query_params['tbs'] . ',' : '' ) . 'itp:' . $options['agt_type'];
-        }
-        
-        // CAMBIO: Validación específica de agt_filetype
-        $valid_filetypes = ['jpg', 'png', 'webp', 'all'];
-        if (!empty($options['agt_filetype']) && in_array($options['agt_filetype'], $valid_filetypes) && $options['agt_filetype'] !== 'all') {
-            $query_params['tbs'] = (isset($query_params['tbs']) ? $query_params['tbs'] . ',' : '') . 'ift:' . $options['agt_filetype'];
-        }
+if ( $search_engine === 'bing' && !empty($options['agt_bing_api_key']) ) {
+    $this->log_message( __( 'Usando Bing API', 'auto-google-thumbnail' ), 'INFO' );
+    $candidates = $this->search_bing_api( $search_term, $options );
+} else {
+    $this->log_message( __( 'Usando Google Scraping', 'auto-google-thumbnail' ), 'INFO' );
+    $candidates = $this->search_google_scraping( $search_term, $options );
+}
 
-        $search_url = 'https://www.google.com/search?' . http_build_query( $query_params );
+if ( empty( $candidates ) ) {
+    return $this->generate_fallback_image( $post_id, $search_term, $options );
+}
 
-        $this->log_message( sprintf( __( 'URL de búsqueda: %s', 'auto-google-thumbnail' ), $search_url ) );
+if ( $options['agt_selection'] === 'best' ) {
+    usort( $candidates, function( $a, $b ) {
+        return $b['score'] - $a['score'];
+    } );
+}
 
-        $response = wp_remote_get( $search_url, array(
-            'timeout'     => 30,
-            'httpversion' => '1.1',
-            'user-agent'  => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        ) );
-
-        if ( is_wp_error( $response ) ) {
-            $this->log_message( sprintf( __( 'Error al obtener resultados de Google: %s', 'auto-google-thumbnail' ), $response->get_error_message() ), 'ERROR' );
-            // NUEVO: Intentar generar imagen de respaldo
-            return $this->generate_fallback_image( $post_id, $search_term, $options );
-        }
-
-        $html = wp_remote_retrieve_body( $response );
-        if ( empty( $html ) ) {
-            $this->log_message( __( 'El cuerpo de la respuesta de Google está vacío.', 'auto-google-thumbnail' ), 'ERROR' );
-            // NUEVO: Intentar generar imagen de respaldo
-            return $this->generate_fallback_image( $post_id, $search_term, $options );
-        }
-
-        // CAMBIO: Procesamos la Blacklist desde los ajustes
-        $blacklist_raw = isset($options['agt_blacklist']) ? $options['agt_blacklist'] : '';
-        $blacklist_domains = array();
-        
-        if (!empty($blacklist_raw)) {
-            // Dividir por comas y/o saltos de línea
-            $items = preg_split('/[\s,]+/', $blacklist_raw, -1, PREG_SPLIT_NO_EMPTY);
-            foreach ($items as $item) {
-                $item = trim($item);
-                // Limpiar protocolo y barras para obtener solo el dominio
-                $item = preg_replace('#^https?://#i', '', $item);
-                $item = rtrim($item, '/');
-                if (!empty($item)) {
-                    $blacklist_domains[] = strtolower($item);
-                }
-            }
-        }
-
-        preg_match_all( '/\["(https?:\/\/[^"]+\.(?:jpg|jpeg|png|gif|webp|bmp))"\s*,\s*(\d+)\s*,\s*(\d+)\]/i', $html, $matches, PREG_SET_ORDER );
-
-        if ( empty( $matches ) ) {
-            $this->log_message( __( 'No se encontraron URLs de imágenes válidas en la respuesta de Google.', 'auto-google-thumbnail' ), 'ERROR' );
-            // NUEVO: Intentar generar imagen de respaldo
-            return $this->generate_fallback_image( $post_id, $search_term, $options );
-        }
-
-        $this->log_message( sprintf( __( 'Se encontraron %d imágenes candidatas.', 'auto-google-thumbnail' ), count( $matches ) ) );
-
-        $candidates = array();
-        foreach ( $matches as $match ) {
-            $url    = $match[1];
-            $width  = intval( $match[2] );
-            $height = intval( $match[3] );
-            
-            // CAMBIO: Aplicar Blacklist
-            $domain = parse_url($url, PHP_URL_HOST);
-            if ($domain) {
-                $domain = strtolower($domain);
-                $is_blocked = false;
-                foreach ($blacklist_domains as $blocked) {
-                    // Comparar si el dominio contiene el patrón bloqueado
-                    if (strpos($domain, $blocked) !== false) {
-                        $is_blocked = true;
-                        break;
-                    }
-                }
-                if ($is_blocked) {
-                    $this->log_message( sprintf( __( 'Imagen excluida por blacklist: %s (dominio: %s)', 'auto-google-thumbnail' ), $url, $domain ), 'INFO' );
-                    continue; // Saltar esta imagen
-                }
-            }
-            
-            if ( $width < 200 || $height < 200 ) {
-                continue;
-            }
-            $score = $width * $height;
-            $candidates[] = array( 'url' => $url, 'score' => $score );
-        }
-
-        if ( empty( $candidates ) ) {
-            $this->log_message( __( 'No se encontraron imágenes candidatas válidas después de aplicar filtros y blacklist.', 'auto-google-thumbnail' ), 'ERROR' );
-            // NUEVO: Intentar generar imagen de respaldo
-            return $this->generate_fallback_image( $post_id, $search_term, $options );
-        }
-
-        if ( $options['agt_selection'] === 'best' ) {
-            usort( $candidates, function( $a, $b ) {
-                return $b['score'] - $a['score'];
-            } );
-        }
-
-        $url_to_try = $candidates[0]['url'];
-
-        require_once ABSPATH . 'wp-admin/includes/file.php';
+require_once ABSPATH . 'wp-admin/includes/file.php';0
 
         foreach ( $candidates as $candidate ) {
             $url = $candidate['url'];
@@ -824,6 +726,168 @@ class Auto_Google_Thumbnail {
         }
 
         return false;
+    }
+    /**
+     * Busca imágenes usando Google Scraping
+     */
+    private function search_google_scraping( $search_term, $options ) {
+        $query_params = array(
+            'q'    => $search_term,
+            'tbm'  => 'isch',
+            'hl'   => $options['agt_language'],
+        );
+
+        if ( ! empty( $options['agt_rights'] ) ) {
+            $query_params['tbs'] = 'il:cl,sur:' . $options['agt_rights'];
+        }
+        if ( ! empty( $options['agt_size'] ) ) {
+            $query_params['tbs'] = ( isset( $query_params['tbs'] ) ? $query_params['tbs'] . ',' : '' ) . 'isz:' . $options['agt_size'];
+        }
+        if ( ! empty( $options['agt_format'] ) ) {
+            $query_params['tbs'] = ( isset( $query_params['tbs'] ) ? $query_params['tbs'] . ',' : '' ) . 'iar:' . $options['agt_format'];
+        }
+        if ( ! empty( $options['agt_type'] ) ) {
+            $query_params['tbs'] = ( isset( $query_params['tbs'] ) ? $query_params['tbs'] . ',' : '' ) . 'itp:' . $options['agt_type'];
+        }
+        
+        $valid_filetypes = ['jpg', 'png', 'webp', 'all'];
+        if (!empty($options['agt_filetype']) && in_array($options['agt_filetype'], $valid_filetypes) && $options['agt_filetype'] !== 'all') {
+            $query_params['tbs'] = (isset($query_params['tbs']) ? $query_params['tbs'] . ',' : '') . 'ift:' . $options['agt_filetype'];
+        }
+
+        $search_url = 'https://www.google.com/search?' . http_build_query( $query_params );
+        $this->log_message( sprintf( __( 'URL Google: %s', 'auto-google-thumbnail' ), $search_url ) );
+
+        $response = wp_remote_get( $search_url, array(
+            'timeout'     => 30,
+            'httpversion' => '1.1',
+            'user-agent'  => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        ) );
+
+        if ( is_wp_error( $response ) ) {
+            $this->log_message( __( 'Error en Google', 'auto-google-thumbnail' ), 'ERROR' );
+            return array();
+        }
+
+        $html = wp_remote_retrieve_body( $response );
+        if ( empty( $html ) ) {
+            return array();
+        }
+
+        preg_match_all( '/\["(https?:\/\/[^"]+\.(?:jpg|jpeg|png|gif|webp|bmp))"\s*,\s*(\d+)\s*,\s*(\d+)\]/i', $html, $matches, PREG_SET_ORDER );
+
+        if ( empty( $matches ) ) {
+            $this->log_message( __( 'No se encontraron URLs en Google', 'auto-google-thumbnail' ), 'ERROR' );
+            return array();
+        }
+
+        $this->log_message( sprintf( __( '%d imágenes encontradas en Google', 'auto-google-thumbnail' ), count( $matches ) ) );
+        return $this->process_candidates( $matches, $options );
+    }
+
+    /**
+     * Busca imágenes usando Bing API
+     */
+    private function search_bing_api( $search_term, $options ) {
+        $api_key = $options['agt_bing_api_key'];
+        
+        if ( empty( $api_key ) ) {
+            $this->log_message( __( 'API Key de Bing vacía', 'auto-google-thumbnail' ), 'ERROR' );
+            return array();
+        }
+
+        $params = array(
+            'q' => $search_term,
+            'count' => 50,
+            'mkt' => $options['agt_language'] . '-' . strtoupper($options['agt_language']),
+        );
+
+        $api_url = 'https://api.bing.microsoft.com/v7.0/images/search?' . http_build_query( $params );
+        $this->log_message( sprintf( __( 'Bing API: %s', 'auto-google-thumbnail' ), $api_url ) );
+
+        $response = wp_remote_get( $api_url, array(
+            'timeout' => 30,
+            'headers' => array(
+                'Ocp-Apim-Subscription-Key' => $api_key,
+            ),
+        ) );
+
+        if ( is_wp_error( $response ) ) {
+            $this->log_message( __( 'Error en Bing API', 'auto-google-thumbnail' ), 'ERROR' );
+            return array();
+        }
+
+        $body = wp_remote_retrieve_body( $response );
+        $data = json_decode( $body, true );
+
+        if ( empty( $data['value'] ) ) {
+            $this->log_message( __( 'Bing API no devolvió imágenes', 'auto-google-thumbnail' ), 'ERROR' );
+            return array();
+        }
+
+        $this->log_message( sprintf( __( '%d imágenes en Bing', 'auto-google-thumbnail' ), count( $data['value'] ) ) );
+
+        $matches = array();
+        foreach ( $data['value'] as $image ) {
+            $matches[] = array(
+                $image['contentUrl'],
+                $image['width'],
+                $image['height']
+            );
+        }
+
+        return $this->process_candidates( $matches, $options );
+    }
+
+    /**
+     * Procesa candidatos (blacklist y filtros)
+     */
+    private function process_candidates( $matches, $options ) {
+        $blacklist_raw = isset($options['agt_blacklist']) ? $options['agt_blacklist'] : '';
+        $blacklist_domains = array();
+        
+        if (!empty($blacklist_raw)) {
+            $items = preg_split('/[\s,]+/', $blacklist_raw, -1, PREG_SPLIT_NO_EMPTY);
+            foreach ($items as $item) {
+                $item = trim($item);
+                $item = preg_replace('#^https?://#i', '', $item);
+                $item = rtrim($item, '/');
+                if (!empty($item)) {
+                    $blacklist_domains[] = strtolower($item);
+                }
+            }
+        }
+
+        $candidates = array();
+        foreach ( $matches as $match ) {
+            $url    = $match[0];
+            $width  = intval( $match[1] );
+            $height = intval( $match[2] );
+            
+            $domain = parse_url($url, PHP_URL_HOST);
+            if ($domain) {
+                $domain = strtolower($domain);
+                $is_blocked = false;
+                foreach ($blacklist_domains as $blocked) {
+                    if (strpos($domain, $blocked) !== false) {
+                        $is_blocked = true;
+                        break;
+                    }
+                }
+                if ($is_blocked) {
+                    continue;
+                }
+            }
+            
+            if ( $width < 200 || $height < 200 ) {
+                continue;
+            }
+            
+            $score = $width * $height;
+            $candidates[] = array( 'url' => $url, 'score' => $score );
+        }
+
+        return $candidates;
     }
 }
 

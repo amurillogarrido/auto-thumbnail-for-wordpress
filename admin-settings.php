@@ -114,7 +114,6 @@ class AGT_Admin_Pages {
         add_settings_field( 'agt_enable_field', 'Activar Plugin', array( $this, 'render_enable_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         add_settings_field( 'agt_selection_field', 'Selección de Imagen', array( $this, 'render_selection_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         add_settings_field( 'agt_language_field', 'Idioma de Búsqueda', array( $this, 'render_language_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
-        // NUEVO: Campo para activar imagen de respaldo
         add_settings_field( 'agt_fallback_enable_field', 'Generar Imagen de Respaldo', array( $this, 'render_fallback_enable_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         
         add_settings_section( 'agt_filter_section', 'Filtros de Búsqueda', null, 'auto-google-thumbnail-settings' );
@@ -123,13 +122,17 @@ class AGT_Admin_Pages {
         add_settings_field( 'agt_format_field', 'Formato de Imagen', array( $this, 'render_format_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
         add_settings_field( 'agt_size_field', 'Tamaño Mínimo', array( $this, 'render_size_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
         add_settings_field( 'agt_type_field', 'Tipo de Imagen', array( $this, 'render_type_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
-        // CAMBIO: Añadido campo de Blacklist
         add_settings_field( 'agt_blacklist_field', 'Lista Negra de Dominios', array( $this, 'render_blacklist_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
+
+        // --- NUEVA SECCIÓN: DIMENSIONES Y CROP ---
+        add_settings_section( 'agt_crop_section', 'Dimensiones y Crop', null, 'auto-google-thumbnail-settings' );
+        add_settings_field( 'agt_crop_enable_field', 'Activar Crop Centrado', array( $this, 'render_crop_enable_field' ), 'auto-google-thumbnail-settings', 'agt_crop_section' );
+        add_settings_field( 'agt_crop_width_field', 'Ancho de Imagen (px)', array( $this, 'render_crop_width_field' ), 'auto-google-thumbnail-settings', 'agt_crop_section' );
+        add_settings_field( 'agt_crop_height_field', 'Alto de Imagen (px)', array( $this, 'render_crop_height_field' ), 'auto-google-thumbnail-settings', 'agt_crop_section' );
 
         // --- SECCIÓN: EDICIÓN DE IMAGEN (FILTROS Y OVERLAY) ---
         add_settings_section( 'agt_overlay_section', 'Edición de Imagen (Filtros y Texto)', null, 'auto-google-thumbnail-settings' );
         
-        // Campo nuevo para Blanco y Negro
         add_settings_field( 'agt_grayscale_enable_field', 'Filtro Blanco y Negro', array( $this, 'render_grayscale_enable_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
         
         add_settings_field( 'agt_overlay_enable_field', 'Activar Superposición de Texto', array( $this, 'render_overlay_enable_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
@@ -138,6 +141,13 @@ class AGT_Admin_Pages {
         add_settings_field( 'agt_overlay_text_color_field', 'Color del Texto', array( $this, 'render_overlay_text_color_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
         add_settings_field( 'agt_overlay_font_family_field', 'Fuente (Carpeta /fonts/)', array( $this, 'render_overlay_font_family_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
         add_settings_field( 'agt_overlay_font_size_field', 'Tamaño de Fuente', array( $this, 'render_overlay_font_size_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
+
+        // --- NUEVA SECCIÓN: MARCO ---
+        add_settings_section( 'agt_frame_section', 'Marco Interior', null, 'auto-google-thumbnail-settings' );
+        add_settings_field( 'agt_frame_enable_field', 'Activar Marco', array( $this, 'render_frame_enable_field' ), 'auto-google-thumbnail-settings', 'agt_frame_section' );
+        add_settings_field( 'agt_frame_color_field', 'Color del Marco', array( $this, 'render_frame_color_field' ), 'auto-google-thumbnail-settings', 'agt_frame_section' );
+        add_settings_field( 'agt_frame_width_field', 'Grosor del Marco (px)', array( $this, 'render_frame_width_field' ), 'auto-google-thumbnail-settings', 'agt_frame_section' );
+        add_settings_field( 'agt_frame_margin_field', 'Margen del Marco (px)', array( $this, 'render_frame_margin_field' ), 'auto-google-thumbnail-settings', 'agt_frame_section' );
     }
     
     public function render_enable_field() {
@@ -169,10 +179,9 @@ class AGT_Admin_Pages {
         echo '</select>';
     }
 
-    // NUEVO: Campo para activar imagen de respaldo
     public function render_fallback_enable_field() {
         $options = get_option('agt_settings');
-        $checked = $options['agt_fallback_enable'] ?? 1; // Activado por defecto
+        $checked = $options['agt_fallback_enable'] ?? 1;
         echo '<input type="checkbox" name="agt_settings[agt_fallback_enable]" value="1" ' . checked( 1, $checked, false ) . ' />';
         echo '<p class="description">Si no se encuentra ninguna imagen en Google, genera una imagen con solo el título y el color de fondo configurado.</p>';
     }
@@ -238,7 +247,6 @@ class AGT_Admin_Pages {
         echo '</select>';
     }
 
-    // CAMBIO: Función para renderizar el campo de Blacklist
     public function render_blacklist_field() {
         $options = get_option('agt_settings');
         $value = $options['agt_blacklist'] ?? '';
@@ -246,9 +254,31 @@ class AGT_Admin_Pages {
         echo '<p class="description">Introduce los dominios a excluir de la búsqueda (uno por línea o separados por comas). Ejemplo: <code>pinterest.com, 123rf.com</code></p>';
     }
 
-    // --- NUEVAS FUNCIONES DE RENDERIZADO (OVERLAY) ---
+    // --- NUEVAS FUNCIONES: CROP ---
 
-    // Nueva función para el checkbox de Escala de Grises
+    public function render_crop_enable_field() {
+        $options = get_option('agt_settings');
+        $checked = $options['agt_crop_enable'] ?? 1;
+        echo '<input type="checkbox" name="agt_settings[agt_crop_enable]" value="1" ' . checked( 1, $checked, false ) . ' />';
+        echo '<p class="description">Redimensiona y recorta las imágenes de Google para que tengan siempre el tamaño exacto configurado abajo. Recomendado para uniformidad visual.</p>';
+    }
+
+    public function render_crop_width_field() {
+        $options = get_option('agt_settings');
+        $value = $options['agt_crop_width'] ?? '1200';
+        echo '<input type="number" name="agt_settings[agt_crop_width]" value="' . esc_attr($value) . '" min="100" max="3000" step="10" />';
+        echo '<p class="description">Ancho final de la imagen en píxeles. Recomendado: 1200px para redes sociales.</p>';
+    }
+
+    public function render_crop_height_field() {
+        $options = get_option('agt_settings');
+        $value = $options['agt_crop_height'] ?? '630';
+        echo '<input type="number" name="agt_settings[agt_crop_height]" value="' . esc_attr($value) . '" min="100" max="3000" step="10" />';
+        echo '<p class="description">Alto final de la imagen en píxeles. Recomendado: 630px para redes sociales (ratio 1.91:1).</p>';
+    }
+
+    // --- FUNCIONES DE RENDERIZADO (OVERLAY) ---
+
     public function render_grayscale_enable_field() {
         $options = get_option('agt_settings');
         $checked = $options['agt_grayscale_enable'] ?? 0;
@@ -287,14 +317,12 @@ class AGT_Admin_Pages {
         $options = get_option('agt_settings');
         $selected = $options['agt_overlay_font_family'] ?? 'Roboto';
         
-        // Usamos claves simples para evitar errores de espacios en nombres de archivo
         $fonts = [ 
             'Roboto' => 'Roboto', 
             'Source' => 'Source', 
         ];
         echo '<select name="agt_settings[agt_overlay_font_family]">';
         foreach ( $fonts as $value => $label ) {
-            // Nota: Aquí he corregido el orden $value => $label para que coincida con el array
             echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
         }
         echo '</select>';
@@ -306,6 +334,36 @@ class AGT_Admin_Pages {
         $value = $options['agt_overlay_font_size'] ?? '40';
         echo '<input type="number" name="agt_settings[agt_overlay_font_size]" value="' . esc_attr($value) . '" min="10" max="200" />';
         echo '<p class="description">Tamaño de la fuente en píxeles. Este valor será fijo para todos los títulos.</p>';
+    }
+
+    // --- NUEVAS FUNCIONES: MARCO ---
+
+    public function render_frame_enable_field() {
+        $options = get_option('agt_settings');
+        $checked = $options['agt_frame_enable'] ?? 0;
+        echo '<input type="checkbox" name="agt_settings[agt_frame_enable]" value="1" ' . checked( 1, $checked, false ) . ' />';
+        echo '<p class="description">Añade un marco/borde decorativo alrededor de la imagen. Ideal para un look elegante y profesional.</p>';
+    }
+
+    public function render_frame_color_field() {
+        $options = get_option('agt_settings');
+        $value = $options['agt_frame_color'] ?? '#FFFFFF';
+        echo '<input type="color" name="agt_settings[agt_frame_color]" value="' . esc_attr($value) . '" />';
+        echo '<p class="description">Color del marco. Blanco es el más elegante sobre fondos oscuros.</p>';
+    }
+
+    public function render_frame_width_field() {
+        $options = get_option('agt_settings');
+        $value = $options['agt_frame_width'] ?? '3';
+        echo '<input type="number" name="agt_settings[agt_frame_width]" value="' . esc_attr($value) . '" min="1" max="20" step="1" />';
+        echo '<p class="description">Grosor del marco en píxeles. Recomendado: 3px.</p>';
+    }
+
+    public function render_frame_margin_field() {
+        $options = get_option('agt_settings');
+        $value = $options['agt_frame_margin'] ?? '40';
+        echo '<input type="number" name="agt_settings[agt_frame_margin]" value="' . esc_attr($value) . '" min="10" max="200" step="5" />';
+        echo '<p class="description">Separación del marco respecto a los bordes de la imagen en píxeles. Recomendado: 40px.</p>';
     }
 }
 

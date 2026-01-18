@@ -174,16 +174,24 @@ class Auto_Google_Thumbnail {
             'agt_type'      => '',
             'agt_language'  => 'es',
             'agt_selection' => 'first',
-            'agt_blacklist' => '', // Nuevo campo blacklist
+            'agt_blacklist' => '',
             // Valores por defecto overlay y filtros
-            'agt_grayscale_enable' => 0, // Nuevo: Filtro B&N
+            'agt_grayscale_enable' => 0,
             'agt_overlay_enable'   => 0,
             'agt_overlay_bg_color' => '#000000',
             'agt_overlay_opacity'  => '50',
             'agt_overlay_text_color' => '#FFFFFF',
             'agt_overlay_font_family' => 'Roboto',
             'agt_overlay_font_size' => '40',
-            'agt_fallback_enable'  => 1, // NUEVO: Activar imagen de respaldo por defecto
+            'agt_fallback_enable'  => 1,
+            // NUEVOS: Crop y Marco
+            'agt_crop_enable'      => 1, // Crop centrado activado por defecto
+            'agt_crop_width'       => 1200,
+            'agt_crop_height'      => 630,
+            'agt_frame_enable'     => 0, // Marco desactivado por defecto
+            'agt_frame_color'      => '#FFFFFF',
+            'agt_frame_width'      => 3,
+            'agt_frame_margin'     => 40,
         );
         $options  = wp_parse_args( get_option( 'agt_settings', array() ), $defaults );
 
@@ -201,7 +209,7 @@ class Auto_Google_Thumbnail {
         $this->log_message( sprintf( __( 'Término de búsqueda: "%s"', 'auto-google-thumbnail' ), $search_term ) );
 
         $query_params = array(
-            'q'    => urlencode( $search_term ),
+            'q'    => $search_term,
             'tbm'  => 'isch',
             'hl'   => $options['agt_language'],
         );
@@ -337,13 +345,26 @@ class Auto_Google_Thumbnail {
                 continue;
             }
 
+            // NUEVO: Aplicar crop centrado si está activado
+            if ( !empty($options['agt_crop_enable']) ) {
+                $crop_result = $this->crop_image_centered( $tmp_file, $options );
+                if ( !$crop_result ) {
+                    $this->log_message( sprintf(
+                        __( 'No se pudo aplicar crop centrado a la imagen %s', 'auto-google-thumbnail' ),
+                        $url
+                    ), 'ERROR' );
+                    @unlink( $tmp_file );
+                    continue;
+                }
+            }
+
             // --- APLICAR PROCESADO DE IMAGEN (Server-Side) ---
-            // Si se activa overlay o filtros, procesamos antes de importar
-            if ( !empty($options['agt_overlay_enable']) || !empty($options['agt_grayscale_enable']) ) {
+            // Si se activa overlay, filtros o marco, procesamos antes de importar
+            if ( !empty($options['agt_overlay_enable']) || !empty($options['agt_grayscale_enable']) || !empty($options['agt_frame_enable']) ) {
                 $result = $this->process_image_overlay( $tmp_file, $search_term, $options );
                 if ( !$result ) {
                     $this->log_message( sprintf(
-                        __( 'No se pudo procesar la imagen (overlay/filtros) para %s', 'auto-google-thumbnail' ),
+                        __( 'No se pudo procesar la imagen (overlay/filtros/marco) para %s', 'auto-google-thumbnail' ),
                         $url
                     ), 'ERROR' );
                     @unlink( $tmp_file );
@@ -355,8 +376,8 @@ class Auto_Google_Thumbnail {
             $path     = parse_url( $url, PHP_URL_PATH );
             $ext      = strtolower( pathinfo( $path, PATHINFO_EXTENSION ) );
             
-            // Si procesamos la imagen (overlay o filtros), convertimos a JPG internamente
-            if ( !empty($options['agt_overlay_enable']) || !empty($options['agt_grayscale_enable']) ) {
+            // Si procesamos la imagen (crop, overlay, filtros o marco), convertimos a JPG internamente
+            if ( !empty($options['agt_crop_enable']) || !empty($options['agt_overlay_enable']) || !empty($options['agt_grayscale_enable']) || !empty($options['agt_frame_enable']) ) {
                 $ext = 'jpg';
             } else {
                  // Validar extensión original si no usamos edición
@@ -398,6 +419,73 @@ class Auto_Google_Thumbnail {
     }
 
     /**
+     * NUEVA FUNCIÓN: Aplica crop centrado a una imagen para que tenga el tamaño exacto deseado
+     * 
+     * @param string $file_path Ruta del archivo de imagen
+     * @param array $options Opciones del plugin
+     * @return bool True si éxito, false si falló
+     */
+    private function crop_image_centered( $file_path, $options ) {
+        $info = getimagesize( $file_path );
+        if ( ! $info ) return false;
+
+        $mime = $info['mime'];
+        $src_width = $info[0];
+        $src_height = $info[1];
+
+        // Dimensiones objetivo
+        $target_width = intval( $options['agt_crop_width'] ?? 1200 );
+        $target_height = intval( $options['agt_crop_height'] ?? 630 );
+
+        // Crear recurso de imagen según tipo
+        switch ( $mime ) {
+            case 'image/jpeg': $src_image = imagecreatefromjpeg( $file_path ); break;
+            case 'image/png':  $src_image = imagecreatefrompng( $file_path ); break;
+            case 'image/webp': $src_image = imagecreatefromwebp( $file_path ); break;
+            default: return false;
+        }
+        if ( ! $src_image ) return false;
+
+        // Calcular el ratio de aspecto
+        $target_ratio = $target_width / $target_height;
+        $src_ratio = $src_width / $src_height;
+
+        // Determinar el área de crop centrado
+        if ( $src_ratio > $target_ratio ) {
+            // La imagen origen es más ancha: crop horizontal
+            $new_src_width = $src_height * $target_ratio;
+            $new_src_height = $src_height;
+            $src_x = ($src_width - $new_src_width) / 2;
+            $src_y = 0;
+        } else {
+            // La imagen origen es más alta: crop vertical
+            $new_src_width = $src_width;
+            $new_src_height = $src_width / $target_ratio;
+            $src_x = 0;
+            $src_y = ($src_height - $new_src_height) / 2;
+        }
+
+        // Crear imagen nueva con las dimensiones objetivo
+        $dst_image = imagecreatetruecolor( $target_width, $target_height );
+        
+        // Copiar y redimensionar con crop centrado
+        imagecopyresampled(
+            $dst_image, $src_image,
+            0, 0,
+            $src_x, $src_y,
+            $target_width, $target_height,
+            $new_src_width, $new_src_height
+        );
+
+        // Guardar sobre el archivo original
+        imagejpeg( $dst_image, $file_path, 90 );
+        imagedestroy( $src_image );
+        imagedestroy( $dst_image );
+
+        return true;
+    }
+
+    /**
      * NUEVA FUNCIÓN: Genera una imagen de respaldo cuando no se encuentra ninguna en Google
      * Crea una imagen desde cero con el color de fondo y el título
      * 
@@ -415,9 +503,9 @@ class Auto_Google_Thumbnail {
 
         $this->log_message( __( 'Iniciando generación de imagen de respaldo (sin imagen de Google).', 'auto-google-thumbnail' ), 'INFO' );
 
-        // Dimensiones de la imagen (1200x630 es un buen tamaño para imágenes destacadas)
-        $width = 1200;
-        $height = 630;
+        // Dimensiones de la imagen
+        $width = intval( $options['agt_crop_width'] ?? 1200 );
+        $height = intval( $options['agt_crop_height'] ?? 630 );
 
         // Crear imagen en blanco
         $im = imagecreatetruecolor( $width, $height );
@@ -447,7 +535,12 @@ class Auto_Google_Thumbnail {
             imagefilter($im, IMG_FILTER_GRAYSCALE);
         }
 
-        // 3. Configurar texto
+        // 3. Aplicar marco si está activado
+        if ( !empty($options['agt_frame_enable']) ) {
+            $this->apply_frame( $im, $width, $height, $options );
+        }
+
+        // 4. Configurar texto
         $font_name = $options['agt_overlay_font_family'] ?? 'Roboto';
         $font_file = $this->get_font_file( $font_name );
         $font_size = intval( $options['agt_overlay_font_size'] ?? 40 );
@@ -465,7 +558,7 @@ class Auto_Google_Thumbnail {
         }
         $text_color = imagecolorallocate( $im, $tr, $tg, $tb );
 
-        // 4. Word Wrap (Ajuste de líneas)
+        // 5. Word Wrap (Ajuste de líneas)
         if ( ! $font_file || ! file_exists( $font_file ) ) {
             imagestring($im, 5, 10, 10, "Error: Sube la fuente " . $font_name . ".ttf a /fonts/", $text_color);
         } else {
@@ -488,7 +581,7 @@ class Auto_Google_Thumbnail {
             }
             $lines[] = $current_line;
 
-            // 5. Centrar y dibujar texto
+            // 6. Centrar y dibujar texto
             $line_height = $font_size * 1.5;
             $total_text_height = count($lines) * $line_height;
             $y_start = ( $height - $total_text_height ) / 2 + $font_size;
@@ -503,7 +596,7 @@ class Auto_Google_Thumbnail {
             }
         }
 
-        // 6. Guardar en archivo temporal
+        // 7. Guardar en archivo temporal
         $upload_dir = wp_upload_dir();
         $tmp_file = $upload_dir['path'] . '/fallback-' . sanitize_file_name( $text ) . '-' . time() . '.jpg';
         
@@ -515,7 +608,7 @@ class Auto_Google_Thumbnail {
             return false;
         }
 
-        // 7. Importar a WordPress
+        // 8. Importar a WordPress
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/image.php';
 
@@ -547,8 +640,40 @@ class Auto_Google_Thumbnail {
     }
 
     /**
-     * Aplica Edición Server-Side: Filtros (B&N) + Overlay oscuro + Texto
-     * * @param string $file_path Ruta local del archivo temporal de imagen.
+     * NUEVA FUNCIÓN: Aplica un marco interior a la imagen
+     * 
+     * @param resource $im Recurso de imagen GD
+     * @param int $width Ancho de la imagen
+     * @param int $height Alto de la imagen
+     * @param array $options Opciones del plugin
+     */
+    private function apply_frame( $im, $width, $height, $options ) {
+        $frame_color_hex = $options['agt_frame_color'] ?? '#FFFFFF';
+        $frame_width = intval( $options['agt_frame_width'] ?? 3 );
+        $frame_margin = intval( $options['agt_frame_margin'] ?? 40 );
+
+        // Convertir color hex a RGB
+        $frame_color_hex = ltrim($frame_color_hex, '#');
+        if (strlen($frame_color_hex) == 3) {
+            $fr = hexdec(substr($frame_color_hex, 0, 1) . substr($frame_color_hex, 0, 1));
+            $fg = hexdec(substr($frame_color_hex, 1, 1) . substr($frame_color_hex, 1, 1));
+            $fb = hexdec(substr($frame_color_hex, 2, 1) . substr($frame_color_hex, 2, 1));
+        } else {
+            $fr = hexdec(substr($frame_color_hex, 0, 2));
+            $fg = hexdec(substr($frame_color_hex, 2, 2));
+            $fb = hexdec(substr($frame_color_hex, 4, 2));
+        }
+        $frame_color = imagecolorallocate( $im, $fr, $fg, $fb );
+
+        // Dibujar el marco (rectángulo vacío)
+        imagesetthickness( $im, $frame_width );
+        imagerectangle( $im, $frame_margin, $frame_margin, $width - $frame_margin, $height - $frame_margin, $frame_color );
+        imagesetthickness( $im, 1 ); // Restaurar grosor por defecto
+    }
+
+    /**
+     * Aplica Edición Server-Side: Filtros (B&N) + Overlay oscuro + Texto + Marco
+     * @param string $file_path Ruta local del archivo temporal de imagen.
      * @param string $text      Texto a escribir (título).
      * @param array  $options   Opciones del plugin.
      * @return bool True si éxito, False si falló.
@@ -661,6 +786,11 @@ class Auto_Google_Thumbnail {
                 }
             }
         } // Fin if overlay_enable
+
+        // --- APLICAR MARCO (Si está activado) ---
+        if ( !empty($options['agt_frame_enable']) ) {
+            $this->apply_frame( $im, $width, $height, $options );
+        }
 
         // 5. Guardar sobre el archivo temporal
         // Convertimos todo a JPG para estandarizar output

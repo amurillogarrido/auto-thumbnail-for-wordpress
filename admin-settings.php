@@ -114,6 +114,8 @@ class AGT_Admin_Pages {
         add_settings_field( 'agt_enable_field', 'Activar Plugin', array( $this, 'render_enable_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         add_settings_field( 'agt_selection_field', 'Selección de Imagen', array( $this, 'render_selection_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         add_settings_field( 'agt_language_field', 'Idioma de Búsqueda', array( $this, 'render_language_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
+        // NUEVO: Campo para activar imagen de respaldo
+        add_settings_field( 'agt_fallback_enable_field', 'Generar Imagen de Respaldo', array( $this, 'render_fallback_enable_field' ), 'auto-google-thumbnail-settings', 'agt_general_section' );
         
         add_settings_section( 'agt_filter_section', 'Filtros de Búsqueda', null, 'auto-google-thumbnail-settings' );
         add_settings_field( 'agt_rights_field', 'Derechos de Uso', array( $this, 'render_rights_field' ), 'auto-google-thumbnail-settings', 'agt_filter_section' );
@@ -135,7 +137,7 @@ class AGT_Admin_Pages {
         add_settings_field( 'agt_overlay_opacity_field', 'Opacidad del Fondo (%)', array( $this, 'render_overlay_opacity_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
         add_settings_field( 'agt_overlay_text_color_field', 'Color del Texto', array( $this, 'render_overlay_text_color_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
         add_settings_field( 'agt_overlay_font_family_field', 'Fuente (Carpeta /fonts/)', array( $this, 'render_overlay_font_family_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
-        add_settings_field( 'agt_overlay_font_size_field', 'Tamaño de Fuente (Máx)', array( $this, 'render_overlay_font_size_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
+        add_settings_field( 'agt_overlay_font_size_field', 'Tamaño de Fuente', array( $this, 'render_overlay_font_size_field' ), 'auto-google-thumbnail-settings', 'agt_overlay_section' );
     }
     
     public function render_enable_field() {
@@ -148,7 +150,7 @@ class AGT_Admin_Pages {
     public function render_selection_field() {
         $options = get_option('agt_settings');
         $selected = $options['agt_selection'] ?? 'first';
-        $selections = [ 'Primera imagen encontrada' => 'first', 'Imagen aleatoria' => 'random' ];
+        $selections = [ 'Primera' => 'first', 'Mejor Resolución' => 'best' ];
         echo '<select name="agt_settings[agt_selection]">';
         foreach ( $selections as $label => $value ) {
             echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
@@ -165,6 +167,14 @@ class AGT_Admin_Pages {
             echo '<option value="' . esc_attr( $value ) . '" ' . selected( $selected, $value, false ) . '>' . esc_html( $label ) . '</option>';
         }
         echo '</select>';
+    }
+
+    // NUEVO: Campo para activar imagen de respaldo
+    public function render_fallback_enable_field() {
+        $options = get_option('agt_settings');
+        $checked = $options['agt_fallback_enable'] ?? 1; // Activado por defecto
+        echo '<input type="checkbox" name="agt_settings[agt_fallback_enable]" value="1" ' . checked( 1, $checked, false ) . ' />';
+        echo '<p class="description">Si no se encuentra ninguna imagen en Google, genera una imagen con solo el título y el color de fondo configurado.</p>';
     }
 
     public function render_rights_field() {
@@ -257,13 +267,14 @@ class AGT_Admin_Pages {
         $options = get_option('agt_settings');
         $value = $options['agt_overlay_bg_color'] ?? '#000000';
         echo '<input type="color" name="agt_settings[agt_overlay_bg_color]" value="' . esc_attr($value) . '" />';
+        echo '<p class="description">Este color se usará también para las imágenes de respaldo (cuando no se encuentre imagen en Google).</p>';
     }
 
     public function render_overlay_opacity_field() {
         $options = get_option('agt_settings');
         $value = $options['agt_overlay_opacity'] ?? '50';
         echo '<input type="number" name="agt_settings[agt_overlay_opacity]" value="' . esc_attr($value) . '" min="0" max="100" step="1" />';
-        echo '<p class="description">Porcentaje de opacidad del fondo (0 = transparente, 100 = sólido).</p>';
+        echo '<p class="description">Porcentaje de opacidad del fondo (0 = transparente, 100 = sólido). Solo se aplica al overlay sobre imágenes de Google, no a imágenes de respaldo.</p>';
     }
 
     public function render_overlay_text_color_field() {
@@ -294,7 +305,7 @@ class AGT_Admin_Pages {
         $options = get_option('agt_settings');
         $value = $options['agt_overlay_font_size'] ?? '40';
         echo '<input type="number" name="agt_settings[agt_overlay_font_size]" value="' . esc_attr($value) . '" min="10" max="200" />';
-        echo '<p class="description">Tamaño máximo de la fuente en píxeles.</p>';
+        echo '<p class="description">Tamaño de la fuente en píxeles. Este valor será fijo para todos los títulos.</p>';
     }
 }
 

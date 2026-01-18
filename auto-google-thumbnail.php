@@ -183,6 +183,7 @@ class Auto_Google_Thumbnail {
             'agt_overlay_text_color' => '#FFFFFF',
             'agt_overlay_font_family' => 'Roboto',
             'agt_overlay_font_size' => '40',
+            'agt_fallback_enable'  => 1, // NUEVO: Activar imagen de respaldo por defecto
         );
         $options  = wp_parse_args( get_option( 'agt_settings', array() ), $defaults );
 
@@ -197,167 +198,158 @@ class Auto_Google_Thumbnail {
             return false;
         }
 
-        $filetype_filter = $options['agt_filetype'];
-        if ( 'all' !== $filetype_filter ) {
-            $search_term .= ' filetype:' . $filetype_filter;
-        }
+        $this->log_message( sprintf( __( 'Término de búsqueda: "%s"', 'auto-google-thumbnail' ), $search_term ) );
 
-        // --- PROCESAMIENTO DE BLACKLIST ---
-        if ( ! empty( $options['agt_blacklist'] ) ) {
-            // Dividir por comas, saltos de línea o espacios
-            $domains = preg_split( '/[\s,]+/', $options['agt_blacklist'] );
-            
-            foreach ( $domains as $domain ) {
-                $domain = trim( $domain );
-                if ( ! empty( $domain ) ) {
-                    // Añadir operador de exclusión a la consulta
-                    $search_term .= ' -site:' . $domain;
-                }
-            }
-        }
-        // ----------------------------------
+        $query_params = array(
+            'q'    => urlencode( $search_term ),
+            'tbm'  => 'isch',
+            'hl'   => $options['agt_language'],
+        );
 
-        $this->log_message( sprintf(
-            __( 'Término de búsqueda obtenido: \'%s\'.', 'auto-google-thumbnail' ),
-            $search_term
-        ) );
-
-        $tbs_parts = array();
         if ( ! empty( $options['agt_rights'] ) ) {
-            $tbs_parts[] = 'sur:' . $options['agt_rights'];
+            $query_params['tbs'] = 'il:cl,sur:' . $options['agt_rights'];
         }
         if ( ! empty( $options['agt_size'] ) ) {
-            $tbs_parts[] = 'isz:' . $options['agt_size'];
+            $query_params['tbs'] = ( isset( $query_params['tbs'] ) ? $query_params['tbs'] . ',' : '' ) . 'isz:' . $options['agt_size'];
         }
         if ( ! empty( $options['agt_format'] ) ) {
-            $tbs_parts[] = 'iar:' . $options['agt_format'];
+            $query_params['tbs'] = ( isset( $query_params['tbs'] ) ? $query_params['tbs'] . ',' : '' ) . 'iar:' . $options['agt_format'];
         }
         if ( ! empty( $options['agt_type'] ) ) {
-            $tbs_parts[] = 'itp:' . $options['agt_type'];
+            $query_params['tbs'] = ( isset( $query_params['tbs'] ) ? $query_params['tbs'] . ',' : '' ) . 'itp:' . $options['agt_type'];
+        }
+        
+        // CAMBIO: Validación específica de agt_filetype
+        $valid_filetypes = ['jpg', 'png', 'webp', 'all'];
+        if (!empty($options['agt_filetype']) && in_array($options['agt_filetype'], $valid_filetypes) && $options['agt_filetype'] !== 'all') {
+            $query_params['tbs'] = (isset($query_params['tbs']) ? $query_params['tbs'] . ',' : '') . 'ift:' . $options['agt_filetype'];
         }
 
-        $query_args = array(
-            'q'   => $search_term,
-            'tbm' => 'isch',
-            'hl'  => $options['agt_language'],
-        );
-        if ( ! empty( $tbs_parts ) ) {
-            $query_args['tbs'] = implode( ',', $tbs_parts );
-        }
+        $search_url = 'https://www.google.com/search?' . http_build_query( $query_params );
 
-        $search_url = add_query_arg( $query_args, 'https://www.google.com/search' );
-        $this->log_message( sprintf(
-            __( 'URL de Google construida: %s', 'auto-google-thumbnail' ),
-            $search_url
+        $this->log_message( sprintf( __( 'URL de búsqueda: %s', 'auto-google-thumbnail' ), $search_url ) );
+
+        $response = wp_remote_get( $search_url, array(
+            'timeout'     => 30,
+            'httpversion' => '1.1',
+            'user-agent'  => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         ) );
 
-        // --- USER AGENT ---
-        $args = array(
-            'user-agent' => 'Mozilla/5.0 (Linux; Android 6.0.1; Nexus 5X Build/MMB29P) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/41.0.2272.96',
-            'sslverify'  => false,
-            'timeout'    => 15,
-        );
-
-        $this->log_message( __( 'Enviando petición a Google...', 'auto-google-thumbnail' ) );
-        $response = wp_remote_get( $search_url, $args );
-        if ( is_wp_error( $response ) || wp_remote_retrieve_response_code( $response ) !== 200 ) {
-            $code = is_wp_error( $response )
-                ? $response->get_error_message()
-                : wp_remote_retrieve_response_code( $response );
-            $this->log_message( sprintf(
-                __( 'Error en la petición a Google. Código/razón: %s', 'auto-google-thumbnail' ),
-                $code
-            ), 'ERROR' );
-            return false;
+        if ( is_wp_error( $response ) ) {
+            $this->log_message( sprintf( __( 'Error al obtener resultados de Google: %s', 'auto-google-thumbnail' ), $response->get_error_message() ), 'ERROR' );
+            // NUEVO: Intentar generar imagen de respaldo
+            return $this->generate_fallback_image( $post_id, $search_term, $options );
         }
 
-        $html_body = wp_remote_retrieve_body( $response );
-        preg_match_all( '/data-ou="(http[^"]*)"/', $html_body, $matches );
-        if ( empty( $matches[1] ) ) {
-            $this->log_message( __( 'No se encontraron imágenes en la respuesta de Google.', 'auto-google-thumbnail' ), 'ERROR' );
-            return false;
+        $html = wp_remote_retrieve_body( $response );
+        if ( empty( $html ) ) {
+            $this->log_message( __( 'El cuerpo de la respuesta de Google está vacío.', 'auto-google-thumbnail' ), 'ERROR' );
+            // NUEVO: Intentar generar imagen de respaldo
+            return $this->generate_fallback_image( $post_id, $search_term, $options );
         }
 
-        $candidates = $matches[1];
-        $this->log_message( sprintf(
-            __( 'Se encontraron %d imágenes candidatas iniciales.', 'auto-google-thumbnail' ),
-            count( $candidates )
-        ) );
-
-        if ( 'all' !== $filetype_filter ) {
-            $filtered = array();
-            foreach ( $candidates as $url ) {
-                $ext = strtolower( pathinfo( parse_url( $url, PHP_URL_PATH ), PATHINFO_EXTENSION ) );
-                if ( $ext === $filetype_filter ) {
-                    $filtered[] = $url;
+        // CAMBIO: Procesamos la Blacklist desde los ajustes
+        $blacklist_raw = isset($options['agt_blacklist']) ? $options['agt_blacklist'] : '';
+        $blacklist_domains = array();
+        
+        if (!empty($blacklist_raw)) {
+            // Dividir por comas y/o saltos de línea
+            $items = preg_split('/[\s,]+/', $blacklist_raw, -1, PREG_SPLIT_NO_EMPTY);
+            foreach ($items as $item) {
+                $item = trim($item);
+                // Limpiar protocolo y barras para obtener solo el dominio
+                $item = preg_replace('#^https?://#i', '', $item);
+                $item = rtrim($item, '/');
+                if (!empty($item)) {
+                    $blacklist_domains[] = strtolower($item);
                 }
             }
-            $candidates = $filtered;
-            $this->log_message( sprintf(
-                __( "Tras filtrar por '.%s', quedan %d imágenes.", 'auto-google-thumbnail' ),
-                $filetype_filter,
-                count( $candidates )
-            ) );
-            if ( empty( $candidates ) ) {
-                $this->log_message( __( 'Ninguna imagen candidata superó el filtro de tipo de archivo.', 'auto-google-thumbnail' ), 'ERROR' );
-                return false;
-            }
         }
 
-        if ( 'random' === $options['agt_selection'] && count( $candidates ) > 1 ) {
-            $random_key = array_rand( $candidates );
-            $ordered = array( $candidates[ $random_key ] );
-            foreach ( $candidates as $i => $u ) {
-                if ( $i !== $random_key ) {
-                    $ordered[] = $u;
-                }
-            }
-        } else {
-            $ordered = $candidates;
+        preg_match_all( '/\["(https?:\/\/[^"]+\.(?:jpg|jpeg|png|gif|webp|bmp))"\s*,\s*(\d+)\s*,\s*(\d+)\]/i', $html, $matches, PREG_SET_ORDER );
+
+        if ( empty( $matches ) ) {
+            $this->log_message( __( 'No se encontraron URLs de imágenes válidas en la respuesta de Google.', 'auto-google-thumbnail' ), 'ERROR' );
+            // NUEVO: Intentar generar imagen de respaldo
+            return $this->generate_fallback_image( $post_id, $search_term, $options );
         }
 
-        require_once ABSPATH . 'wp-admin/includes/media.php';
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-        require_once ABSPATH . 'wp-admin/includes/image.php';
+        $this->log_message( sprintf( __( 'Se encontraron %d imágenes candidatas.', 'auto-google-thumbnail' ), count( $matches ) ) );
 
-        foreach ( $ordered as $url ) {
-            $url = trim( $url );
-
-            if ( preg_match( '/_next\/image\?url=([^&]+)/', $url, $m ) ) {
-                $decoded_url = urldecode( $m[1] );
-                if ( filter_var( $decoded_url, FILTER_VALIDATE_URL ) ) {
-                    $url = $decoded_url;
+        $candidates = array();
+        foreach ( $matches as $match ) {
+            $url    = $match[1];
+            $width  = intval( $match[2] );
+            $height = intval( $match[3] );
+            
+            // CAMBIO: Aplicar Blacklist
+            $domain = parse_url($url, PHP_URL_HOST);
+            if ($domain) {
+                $domain = strtolower($domain);
+                $is_blocked = false;
+                foreach ($blacklist_domains as $blocked) {
+                    // Comparar si el dominio contiene el patrón bloqueado
+                    if (strpos($domain, $blocked) !== false) {
+                        $is_blocked = true;
+                        break;
+                    }
+                }
+                if ($is_blocked) {
+                    $this->log_message( sprintf( __( 'Imagen excluida por blacklist: %s (dominio: %s)', 'auto-google-thumbnail' ), $url, $domain ), 'INFO' );
+                    continue; // Saltar esta imagen
                 }
             }
-
-            if ( strpos( $url, 'lookaside.fbsbx.com' ) !== false ) {
+            
+            if ( $width < 200 || $height < 200 ) {
                 continue;
             }
+            $score = $width * $height;
+            $candidates[] = array( 'url' => $url, 'score' => $score );
+        }
 
-            // Descargar la imagen a temporal
-            $tmp_file = download_url( $url );
+        if ( empty( $candidates ) ) {
+            $this->log_message( __( 'No se encontraron imágenes candidatas válidas después de aplicar filtros y blacklist.', 'auto-google-thumbnail' ), 'ERROR' );
+            // NUEVO: Intentar generar imagen de respaldo
+            return $this->generate_fallback_image( $post_id, $search_term, $options );
+        }
+
+        if ( $options['agt_selection'] === 'best' ) {
+            usort( $candidates, function( $a, $b ) {
+                return $b['score'] - $a['score'];
+            } );
+        }
+
+        $url_to_try = $candidates[0]['url'];
+
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+
+        foreach ( $candidates as $candidate ) {
+            $url = $candidate['url'];
+            $this->log_message( sprintf( __( 'Intentando descargar: %s', 'auto-google-thumbnail' ), $url ) );
+
+            $tmp_file = download_url( $url, 60 );
             if ( is_wp_error( $tmp_file ) ) {
                 $this->log_message( sprintf(
-                    __( 'download_url falló para %s: %s', 'auto-google-thumbnail' ),
+                    __( 'download_url() falló para %s: %s', 'auto-google-thumbnail' ),
                     $url,
                     $tmp_file->get_error_message()
                 ), 'ERROR' );
                 continue;
             }
 
-            // --- PROCESAMIENTO DE IMAGEN (Overlay / Filtros) ---
-            // Procesamos si hay overlay O si hay filtro escala de grises
+            // --- APLICAR PROCESADO DE IMAGEN (Server-Side) ---
+            // Si se activa overlay o filtros, procesamos antes de importar
             if ( !empty($options['agt_overlay_enable']) || !empty($options['agt_grayscale_enable']) ) {
-                $titulo_entrada = get_the_title( $post_id );
-                $processed = $this->process_image_overlay( $tmp_file, $titulo_entrada, $options );
-                
-                if ( ! $processed ) {
-                    $this->log_message( __( 'Error aplicando edición de imagen. Usando imagen original.', 'auto-google-thumbnail' ), 'INFO' );
-                } else {
-                    $this->log_message( __( 'Edición de imagen aplicada correctamente.', 'auto-google-thumbnail' ), 'SUCCESS' );
+                $result = $this->process_image_overlay( $tmp_file, $search_term, $options );
+                if ( !$result ) {
+                    $this->log_message( sprintf(
+                        __( 'No se pudo procesar la imagen (overlay/filtros) para %s', 'auto-google-thumbnail' ),
+                        $url
+                    ), 'ERROR' );
+                    @unlink( $tmp_file );
+                    continue; // Intentar siguiente candidato
                 }
             }
-            // --------------------------------------
 
             // Obtener extensión real (después del procesado, siempre es JPG si se procesó)
             $path     = parse_url( $url, PHP_URL_PATH );
@@ -401,7 +393,157 @@ class Auto_Google_Thumbnail {
         }
 
         $this->log_message( __( 'Ninguna URL candidata pudo descargarse correctamente.', 'auto-google-thumbnail' ), 'ERROR' );
-        return false;
+        // NUEVO: Intentar generar imagen de respaldo como último recurso
+        return $this->generate_fallback_image( $post_id, $search_term, $options );
+    }
+
+    /**
+     * NUEVA FUNCIÓN: Genera una imagen de respaldo cuando no se encuentra ninguna en Google
+     * Crea una imagen desde cero con el color de fondo y el título
+     * 
+     * @param int $post_id ID del post
+     * @param string $text Título del post
+     * @param array $options Opciones del plugin
+     * @return bool True si se generó con éxito, false en caso contrario
+     */
+    private function generate_fallback_image( $post_id, $text, $options ) {
+        // Verificar si la función de respaldo está habilitada
+        if ( empty( $options['agt_fallback_enable'] ) ) {
+            $this->log_message( __( 'Imagen de respaldo desactivada en los ajustes. No se generará imagen.', 'auto-google-thumbnail' ), 'INFO' );
+            return false;
+        }
+
+        $this->log_message( __( 'Iniciando generación de imagen de respaldo (sin imagen de Google).', 'auto-google-thumbnail' ), 'INFO' );
+
+        // Dimensiones de la imagen (1200x630 es un buen tamaño para imágenes destacadas)
+        $width = 1200;
+        $height = 630;
+
+        // Crear imagen en blanco
+        $im = imagecreatetruecolor( $width, $height );
+        if ( ! $im ) {
+            $this->log_message( __( 'Error al crear la imagen de respaldo.', 'auto-google-thumbnail' ), 'ERROR' );
+            return false;
+        }
+
+        // 1. Aplicar color de fondo
+        $hex = $options['agt_overlay_bg_color'] ?? '#000000';
+        $hex = ltrim($hex, '#');
+        if (strlen($hex) == 3) {
+            $r = hexdec(substr($hex, 0, 1) . substr($hex, 0, 1));
+            $g = hexdec(substr($hex, 1, 1) . substr($hex, 1, 1));
+            $b = hexdec(substr($hex, 2, 1) . substr($hex, 2, 1));
+        } else {
+            $r = hexdec(substr($hex, 0, 2));
+            $g = hexdec(substr($hex, 2, 2));
+            $b = hexdec(substr($hex, 4, 2));
+        }
+
+        $bg_color = imagecolorallocate( $im, $r, $g, $b );
+        imagefilledrectangle( $im, 0, 0, $width, $height, $bg_color );
+
+        // 2. Aplicar filtro de escala de grises si está activado
+        if ( !empty($options['agt_grayscale_enable']) ) {
+            imagefilter($im, IMG_FILTER_GRAYSCALE);
+        }
+
+        // 3. Configurar texto
+        $font_name = $options['agt_overlay_font_family'] ?? 'Roboto';
+        $font_file = $this->get_font_file( $font_name );
+        $font_size = intval( $options['agt_overlay_font_size'] ?? 40 );
+
+        $text_hex = $options['agt_overlay_text_color'] ?? '#FFFFFF';
+        $text_hex = ltrim($text_hex, '#');
+        if (strlen($text_hex) == 3) {
+            $tr = hexdec(substr($text_hex, 0, 1) . substr($text_hex, 0, 1));
+            $tg = hexdec(substr($text_hex, 1, 1) . substr($text_hex, 1, 1));
+            $tb = hexdec(substr($text_hex, 2, 1) . substr($text_hex, 2, 1));
+        } else {
+            $tr = hexdec(substr($text_hex, 0, 2));
+            $tg = hexdec(substr($text_hex, 2, 2));
+            $tb = hexdec(substr($text_hex, 4, 2));
+        }
+        $text_color = imagecolorallocate( $im, $tr, $tg, $tb );
+
+        // 4. Word Wrap (Ajuste de líneas)
+        if ( ! $font_file || ! file_exists( $font_file ) ) {
+            imagestring($im, 5, 10, 10, "Error: Sube la fuente " . $font_name . ".ttf a /fonts/", $text_color);
+        } else {
+            $words = explode( ' ', $text );
+            $lines = array();
+            $current_line = '';
+            $max_width = $width * 0.8;
+
+            foreach ( $words as $word ) {
+                $test_line = $current_line . ($current_line ? ' ' : '') . $word;
+                $bbox = imagettfbbox( $font_size, 0, $font_file, $test_line );
+                $line_width = abs( $bbox[4] - $bbox[0] );
+
+                if ( $line_width > $max_width && !empty($current_line) ) {
+                    $lines[] = $current_line;
+                    $current_line = $word;
+                } else {
+                    $current_line = $test_line;
+                }
+            }
+            $lines[] = $current_line;
+
+            // 5. Centrar y dibujar texto
+            $line_height = $font_size * 1.5;
+            $total_text_height = count($lines) * $line_height;
+            $y_start = ( $height - $total_text_height ) / 2 + $font_size;
+
+            foreach ( $lines as $i => $line ) {
+                $bbox = imagettfbbox( $font_size, 0, $font_file, $line );
+                $text_w = abs( $bbox[4] - $bbox[0] );
+                $x_pos = ( $width - $text_w ) / 2;
+                $y_pos = $y_start + ( $i * $line_height );
+
+                imagettftext( $im, $font_size, 0, $x_pos, $y_pos, $text_color, $font_file, $line );
+            }
+        }
+
+        // 6. Guardar en archivo temporal
+        $upload_dir = wp_upload_dir();
+        $tmp_file = $upload_dir['path'] . '/fallback-' . sanitize_file_name( $text ) . '-' . time() . '.jpg';
+        
+        $saved = imagejpeg( $im, $tmp_file, 90 );
+        imagedestroy( $im );
+
+        if ( ! $saved || ! file_exists( $tmp_file ) ) {
+            $this->log_message( __( 'Error al guardar la imagen de respaldo en el servidor.', 'auto-google-thumbnail' ), 'ERROR' );
+            return false;
+        }
+
+        // 7. Importar a WordPress
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
+
+        $file_array = array(
+            'name'     => sanitize_file_name( $text ) . '.jpg',
+            'tmp_name' => $tmp_file,
+        );
+
+        $attach_id = media_handle_sideload( $file_array, $post_id, $text );
+        
+        if ( is_wp_error( $attach_id ) ) {
+            @unlink( $tmp_file );
+            $this->log_message( sprintf(
+                __( 'Error al importar imagen de respaldo: %s', 'auto-google-thumbnail' ),
+                $attach_id->get_error_message()
+            ), 'ERROR' );
+            return false;
+        }
+
+        set_post_thumbnail( $post_id, $attach_id );
+        update_post_meta( $attach_id, '_wp_attachment_image_alt', $text );
+
+        $this->log_message( sprintf(
+            __( '¡ÉXITO! Imagen de respaldo generada y asignada a la entrada (ID de adjunto: %d).', 'auto-google-thumbnail' ),
+            $attach_id
+        ), 'SUCCESS' );
+
+        return true;
     }
 
     /**

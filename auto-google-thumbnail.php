@@ -15,6 +15,11 @@ if ( ! defined( 'WPINC' ) ) {
     die;
 }
 
+// Cargar funciones de media de WordPress necesarias para media_handle_sideload()
+if ( ! function_exists( 'media_handle_sideload' ) ) {
+    require_once ABSPATH . 'wp-admin/includes/media.php';
+}
+
 require_once plugin_dir_path( __FILE__ ) . 'admin-settings.php';
 require_once plugin_dir_path( __FILE__ ) . 'bulk-generate.php';
 

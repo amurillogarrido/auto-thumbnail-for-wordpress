@@ -18,6 +18,8 @@ if ( ! defined( 'WPINC' ) ) {
 // Cargar funciones de media de WordPress necesarias para media_handle_sideload()
 if ( ! function_exists( 'media_handle_sideload' ) ) {
     require_once ABSPATH . 'wp-admin/includes/media.php';
+    require_once ABSPATH . 'wp-admin/includes/file.php';
+    require_once ABSPATH . 'wp-admin/includes/image.php';
 }
 
 require_once plugin_dir_path( __FILE__ ) . 'admin-settings.php';
@@ -85,6 +87,13 @@ class Auto_Google_Thumbnail {
     * @param WP_Post $post    Objeto del post guardado.
     */
    public function on_save_post( $post_id, $post ) {
+        // Cargar funciones de administración si no están disponibles (modo cron)
+        if ( ! function_exists( 'media_handle_sideload' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/media.php';
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+        }
+
         // Si no es una entrada ('post'), no hacemos nada.
         if ( get_post_type( $post_id ) !== 'post' ) {
             return; 
@@ -133,6 +142,13 @@ class Auto_Google_Thumbnail {
      * @return bool True si se asignó con éxito, false en caso contrario.
      */
     public function set_featured_image_from_google( $post_id ) {
+        // Asegurar que las funciones de admin estén cargadas
+        if ( ! function_exists( 'media_handle_sideload' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/media.php';
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+        }
+
         // Comprobaciones iniciales (revisiones, autosaves)
         if ( wp_is_post_revision( $post_id ) || wp_is_post_autosave( $post_id ) ) {
             return false;
@@ -213,30 +229,30 @@ class Auto_Google_Thumbnail {
             return false;
         }
 
-$this->log_message( sprintf( __( 'Término de búsqueda: "%s"', 'auto-google-thumbnail' ), $search_term ) );
+        $this->log_message( sprintf( __( 'Término de búsqueda: "%s"', 'auto-google-thumbnail' ), $search_term ) );
 
-// Decidir qué motor usar
-$search_engine = $options['agt_search_engine'] ?? 'google';
+        // Decidir qué motor usar
+        $search_engine = $options['agt_search_engine'] ?? 'google';
 
-if ( $search_engine === 'bing' && !empty($options['agt_bing_api_key']) ) {
-    $this->log_message( __( 'Usando Bing API', 'auto-google-thumbnail' ), 'INFO' );
-    $candidates = $this->search_bing_api( $search_term, $options );
-} else {
-    $this->log_message( __( 'Usando Google Scraping', 'auto-google-thumbnail' ), 'INFO' );
-    $candidates = $this->search_google_scraping( $search_term, $options );
-}
+        if ( $search_engine === 'bing' && !empty($options['agt_bing_api_key']) ) {
+            $this->log_message( __( 'Usando Bing API', 'auto-google-thumbnail' ), 'INFO' );
+            $candidates = $this->search_bing_api( $search_term, $options );
+        } else {
+            $this->log_message( __( 'Usando Google Scraping', 'auto-google-thumbnail' ), 'INFO' );
+            $candidates = $this->search_google_scraping( $search_term, $options );
+        }
 
-if ( empty( $candidates ) ) {
-    return $this->generate_fallback_image( $post_id, $search_term, $options );
-}
+        if ( empty( $candidates ) ) {
+            return $this->generate_fallback_image( $post_id, $search_term, $options );
+        }
 
-if ( $options['agt_selection'] === 'best' ) {
-    usort( $candidates, function( $a, $b ) {
-        return $b['score'] - $a['score'];
-    } );
-}
+        if ( $options['agt_selection'] === 'best' ) {
+            usort( $candidates, function( $a, $b ) {
+                return $b['score'] - $a['score'];
+            } );
+        }
 
-require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/file.php';
 
         foreach ( $candidates as $candidate ) {
             $url = $candidate['url'];
@@ -402,6 +418,13 @@ require_once ABSPATH . 'wp-admin/includes/file.php';
      * @return bool True si se generó con éxito, false en caso contrario
      */
     private function generate_fallback_image( $post_id, $text, $options ) {
+        // Asegurar que las funciones de admin estén cargadas
+        if ( ! function_exists( 'media_handle_sideload' ) ) {
+            require_once ABSPATH . 'wp-admin/includes/media.php';
+            require_once ABSPATH . 'wp-admin/includes/file.php';
+            require_once ABSPATH . 'wp-admin/includes/image.php';
+        }
+
         // Verificar si la función de respaldo está habilitada
         if ( empty( $options['agt_fallback_enable'] ) ) {
             $this->log_message( __( 'Imagen de respaldo desactivada en los ajustes. No se generará imagen.', 'auto-google-thumbnail' ), 'INFO' );
@@ -516,9 +539,6 @@ require_once ABSPATH . 'wp-admin/includes/file.php';
         }
 
         // 8. Importar a WordPress
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-        require_once ABSPATH . 'wp-admin/includes/image.php';
-
         $file_array = array(
             'name'     => sanitize_file_name( $text ) . '.jpg',
             'tmp_name' => $tmp_file,
